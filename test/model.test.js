@@ -45,13 +45,53 @@ const monitors = {
     3: { id: 3, name: "immich-db", parent: 1, active: true },
     4: { id: 4, name: "old-thing", parent: 1, active: false },
     5: { id: 5, name: "standalone", parent: null, active: true },
+    // Deliberately created after Immich but sorting before it, and named with
+    // stray whitespace of the kind Uptime Kuma happily accepts.
+    6: { id: 6, name: " Audiobookshelf", type: "group", parent: null, active: true },
+    7: { id: 7, name: "abs-web", parent: 6, active: true },
+    8: { id: 8, name: "another-standalone", parent: null, active: true },
 };
 
 test("buildView nests monitors under their parent group", () => {
     const view = buildView(monitors, { 2: [beat(1)], 3: [beat(1)], 5: [beat(1)] });
     const immich = view.groups.find((g) => g.id === 1);
 
-    expect(immich.children.map((m) => m.name)).toEqual(["immich-web", "immich-db"]);
+    expect(immich.children.map((m) => m.name)).toEqual(["immich-db", "immich-web"]);
+});
+
+test("groups are listed alphabetically, not in the order they were created", () => {
+    const view = buildView(monitors, {});
+
+    expect(view.groups.map((g) => g.name)).toEqual([" Audiobookshelf", "Immich"]);
+});
+
+test("sorting ignores stray whitespace around a name", () => {
+    const view = buildView(monitors, {});
+
+    // " Audiobookshelf" sorts under A, not ahead of everything.
+    expect(view.groups[0].name).toBe(" Audiobookshelf");
+    expect(view.groups[1].name).toBe("Immich");
+});
+
+test("sorting ignores case, so capitals do not clump", () => {
+    const mixed = {
+        1: { id: 1, name: "zebra", parent: null, active: true },
+        2: { id: 2, name: "Apple", parent: null, active: true },
+    };
+
+    expect(buildView(mixed, {}).ungrouped.map((m) => m.name)).toEqual(["Apple", "zebra"]);
+});
+
+test("ungrouped monitors are alphabetical too", () => {
+    const view = buildView(monitors, {});
+
+    expect(view.ungrouped.map((m) => m.name)).toEqual(["another-standalone", "standalone"]);
+});
+
+test("Problems are alphabetical", () => {
+    const view = buildView(monitors, { 2: [beat(0)], 3: [beat(0)], 5: [beat(0)] });
+
+    expect(view.problems.map((m) => m.name)).toEqual(["immich-db", "immich-web", "standalone"]);
 });
 
 test("a group reports the worst status among its children", () => {
@@ -63,7 +103,7 @@ test("a group reports the worst status among its children", () => {
 test("a monitor with no parent stands at the top level", () => {
     const view = buildView(monitors, { 2: [beat(1)], 3: [beat(1)], 5: [beat(1)] });
 
-    expect(view.ungrouped.map((m) => m.name)).toEqual(["standalone"]);
+    expect(view.ungrouped.map((m) => m.name)).toContain("standalone");
 });
 
 test("every Down monitor is listed in Problems, flattened out of its group", () => {

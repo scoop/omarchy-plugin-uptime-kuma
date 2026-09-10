@@ -73,6 +73,9 @@ Clicking the indicator opens the same view.
 | `Enter` | open in Uptime Kuma, or fold a group |
 | `Esc`   | clear the filter, then close         |
 
+Groups, monitors and problems are all listed alphabetically, so where a thing
+sits depends on what it is called rather than on when you created it.
+
 Selecting a row shows its full error message; the others stay on one line.
 
 Groups are folded shut by default, so a healthy instance is a dozen rows rather

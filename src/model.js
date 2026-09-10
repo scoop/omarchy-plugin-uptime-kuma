@@ -70,6 +70,34 @@ function worstStatus(statuses) {
 }
 
 /**
+ * Order by name, case-insensitively and ignoring stray surrounding whitespace.
+ *
+ * Uptime Kuma accepts a name like " Beszel", and left alone that leading space
+ * would sort it ahead of every real letter. Position should be a property of
+ * what a thing is called, not of how it was typed or when it was created.
+ *
+ * @param {Array} items anything carrying a `name`
+ * @returns {Array} the same items, ordered
+ */
+function byName(items) {
+    return items.slice().sort(function (a, b) {
+        var left = String(a.name || "")
+            .trim()
+            .toLowerCase();
+        var right = String(b.name || "")
+            .trim()
+            .toLowerCase();
+        if (left < right) {
+            return -1;
+        }
+        if (left > right) {
+            return 1;
+        }
+        return 0;
+    });
+}
+
+/**
  * One monitor, reduced to what the Pane renders.
  *
  * @param {object} monitor a monitor as it appears in `monitorList`
@@ -170,7 +198,16 @@ function buildView(monitorList, beatsById) {
         );
     }
 
-    return { groups: groups, ungrouped: ungrouped, problems: problems, counts: counts };
+    for (var s = 0; s < groups.length; s++) {
+        groups[s].children = byName(groups[s].children);
+    }
+
+    return {
+        groups: byName(groups),
+        ungrouped: byName(ungrouped),
+        problems: byName(problems),
+        counts: counts,
+    };
 }
 
 if (typeof module !== "undefined") {
