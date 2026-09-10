@@ -21,6 +21,15 @@ function downCount(children) {
     return n;
 }
 
+/** What a group says about itself on the right-hand side. */
+function groupDetail(children) {
+    var down = downCount(children);
+    if (down === 0) {
+        return String(children.length);
+    }
+    return down + " down / " + children.length;
+}
+
 /** The right-hand text on a monitor row: latency when we have it. */
 function monitorDetail(monitor) {
     if (typeof monitor.ping === "number") {
@@ -37,6 +46,20 @@ function monitorRow(monitor, detail) {
         detail: detail,
         status: monitor.status,
         error: monitor.error || "",
+        selectable: true,
+    };
+}
+
+/** A heading. Announces a section; the keyboard passes over it. */
+function sectionRow(id, label, status) {
+    return {
+        type: "section",
+        id: id,
+        label: label,
+        detail: "",
+        status: status,
+        error: "",
+        selectable: false,
     };
 }
 
@@ -49,10 +72,10 @@ function monitorRow(monitor, detail) {
  *
  * @param {object|null} view output of `buildView`
  * @param {string} filterText what the operator has typed, if anything
- * @param {object} collapsed group ids the operator has folded shut
+ * @param {object} opened group ids the operator has folded open
  * @returns {Array} rows, in display order
  */
-function flatten(view, filterText, collapsed) {
+function flatten(view, filterText, opened) {
     if (!view) {
         return [];
     }
@@ -60,7 +83,7 @@ function flatten(view, filterText, collapsed) {
     var filter = String(filterText || "")
         .toLowerCase()
         .trim();
-    var folded = collapsed || {};
+    var unfolded = opened || {};
     var rows = [];
     var groups = view.groups || [];
     var i;
@@ -75,12 +98,21 @@ function flatten(view, filterText, collapsed) {
     }
 
     var problems = view.problems || [];
+    var problemRows = [];
     for (i = 0; i < problems.length; i++) {
         if (filter && !matches(problems[i].name, filter)) {
             continue;
         }
-        rows.push(monitorRow(problems[i], groupNameFor[problems[i].id] || ""));
+        problemRows.push(monitorRow(problems[i], groupNameFor[problems[i].id] || ""));
     }
+    if (problemRows.length > 0) {
+        rows.push(sectionRow("problems", "Problems", "down"));
+        for (i = 0; i < problemRows.length; i++) {
+            rows.push(problemRows[i]);
+        }
+    }
+
+    rows.push(sectionRow("monitors", "Monitors", "up"));
 
     for (i = 0; i < groups.length; i++) {
         var group = groups[i];
@@ -102,14 +134,18 @@ function flatten(view, filterText, collapsed) {
             type: "group",
             id: group.id,
             label: group.name,
-            detail: downCount(group.children) + " down / " + group.children.length,
+            // A healthy group has nothing to report but its size. Saying
+            // "0 down" on eleven groups buries the one that says "1 down".
+            detail: groupDetail(group.children),
             status: group.status,
             error: "",
+            selectable: true,
         });
 
-        // A filter always opens what it matched: hiding the hit behind a fold
-        // the operator cannot see would make the search useless.
-        if (folded[group.id] && filter === "") {
+        // Groups start folded shut — a healthy instance should be a dozen
+        // rows, not a wall. A filter always opens what it matched: hiding the
+        // hit behind a fold the operator cannot see makes the search useless.
+        if (!unfolded[group.id] && filter === "") {
             continue;
         }
 

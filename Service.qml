@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 import "src/engine.js" as Engine
 import "src/model.js" as Model
 
@@ -40,6 +41,23 @@ Item {
     property int _backoffMs: 1000
 
     readonly property string _pluginDir: Qt.resolvedUrl(".").toString().replace("file://", "")
+
+    // The shell's palette keeps only foreground/background/accent/muted/urgent;
+    // the theme's own `green` is parsed and thrown away. A monitoring view needs
+    // to say "checked, and fine" in a way that reads differently from "no
+    // information", so we read that one value ourselves rather than inventing a
+    // colour or settling for grey.
+    property color okColor: Color.muted
+
+    FileView {
+        path: Color.currentThemePath + "/colors.toml"
+        watchChanges: true
+        printErrors: false
+        onLoaded: {
+            var match = /^[ \t]*green[ \t]*=[ \t]*["']?(#[0-9A-Fa-f]{6})/m.exec(text());
+            root.okColor = match ? match[1] : Color.muted;
+        }
+    }
 
     signal loginFailed(string message)
     signal loginNeedsTotp

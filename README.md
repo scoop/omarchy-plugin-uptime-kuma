@@ -74,6 +74,10 @@ Clicking the indicator opens the same view.
 | `Space` | expand a long error message          |
 | `Esc`   | clear the filter, then close         |
 
+Groups are folded shut by default, so a healthy instance is a dozen rows rather
+than a wall of green. Anything down is pinned above the tree regardless, so
+folding never hides a problem.
+
 Paused monitors are hidden and only counted — Uptime Kuma is not checking them,
 so they have nothing to report.
 

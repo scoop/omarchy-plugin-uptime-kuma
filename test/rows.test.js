@@ -24,15 +24,49 @@ const view = {
     problems: [{ id: 1, name: "immich-web", status: "down", error: "ECONNREFUSED", ping: null }],
 };
 
-test("Problems come first, before any group", () => {
+test("a Problems section is announced, then its monitors", () => {
     const rows = flatten(view, "", {});
 
-    expect(rows[0].id).toBe(1);
-    expect(rows[0].type).toBe("monitor");
+    expect(rows[0]).toEqual({
+        type: "section",
+        id: "problems",
+        label: "Problems",
+        detail: "",
+        status: "down",
+        error: "",
+        selectable: false,
+    });
+    expect(rows[1].id).toBe(1);
+    expect(rows[1].type).toBe("monitor");
 });
 
 test("a problem row names the group it came from, since it was pulled out of it", () => {
-    expect(flatten(view, "", {})[0].detail).toBe("Immich");
+    expect(flatten(view, "", {})[1].detail).toBe("Immich");
+});
+
+test("the tree is introduced by its own section header", () => {
+    const rows = flatten(view, "", {});
+    const section = rows.find((r) => r.type === "section" && r.id === "monitors");
+
+    expect(section.label).toBe("Monitors");
+    expect(rows.indexOf(section)).toBeLessThan(rows.findIndex((r) => r.type === "group"));
+});
+
+test("with nothing wrong, there is no Problems section at all", () => {
+    const healthy = { ...view, problems: [] };
+    const rows = flatten(healthy, "", {});
+
+    expect(rows.some((r) => r.id === "problems")).toBe(false);
+    expect(rows[0].id).toBe("monitors");
+});
+
+test("section rows are not selectable", () => {
+    const rows = flatten(view, "", {});
+
+    expect(rows.filter((r) => r.selectable === false).every((r) => r.type === "section")).toBe(
+        true,
+    );
+    expect(rows.find((r) => r.type === "monitor").selectable).toBe(true);
 });
 
 test("groups follow, each carrying how many of its children are down", () => {
@@ -42,15 +76,21 @@ test("groups follow, each carrying how many of its children are down", () => {
     expect(immich.detail).toBe("1 down / 2");
 });
 
-test("a collapsed group hides its children but stays visible itself", () => {
-    const rows = flatten(view, "", { 10: true });
+test("groups are folded shut by default, so a healthy instance is a short list", () => {
+    const rows = flatten(view, "", {});
 
     expect(rows.some((r) => r.type === "group" && r.id === 10)).toBe(true);
     expect(rows.some((r) => r.type === "monitor" && r.id === 2)).toBe(false);
 });
 
+test("an opened group shows its children", () => {
+    const rows = flatten(view, "", { 10: true });
+
+    expect(rows.some((r) => r.type === "monitor" && r.id === 2)).toBe(true);
+});
+
 test("ungrouped monitors are listed after the groups", () => {
-    const rows = flatten(view, "", {});
+    const rows = flatten(view, "", { 10: true, 20: true });
     const lastGroup = rows.map((r) => r.type).lastIndexOf("group");
 
     expect(rows.findIndex((r) => r.id === 4 && r.type === "monitor")).toBeGreaterThan(lastGroup);
@@ -67,8 +107,8 @@ test("a filter matches regardless of case", () => {
     expect(flatten(view, "IMMICH-WEB", {}).some((r) => r.label === "immich-web")).toBe(true);
 });
 
-test("filtering expands a collapsed group, or its match would be unreachable", () => {
-    const rows = flatten(view, "immich-db", { 10: true });
+test("filtering opens a folded group, or its match would be unreachable", () => {
+    const rows = flatten(view, "immich-db", {});
 
     expect(rows.some((r) => r.label === "immich-db")).toBe(true);
 });
@@ -81,4 +121,10 @@ test("a group whose own name matches keeps all of its children", () => {
 
 test("an absent view yields no rows rather than throwing", () => {
     expect(flatten(null, "", {})).toEqual([]);
+});
+
+test("a healthy group shows only how many monitors it holds", () => {
+    const rows = flatten(view, "", {});
+
+    expect(rows.find((r) => r.type === "group" && r.id === 20).detail).toBe("1");
 });

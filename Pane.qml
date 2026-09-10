@@ -2,6 +2,8 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
 import qs.Commons
 import qs.Ui
 import "src/rows.js" as Rows
@@ -23,27 +25,21 @@ Item {
     property bool opened: false
     property string filterText: ""
     property int selectedIndex: 0
-    property var collapsed: ({})
-    property var expandedId: 0
+    property var opened_: ({})
+    property int expandedId: 0
 
     readonly property var view: service && service.view ? service.view : null
     readonly property string connection: service ? service.connection : "setup"
+    readonly property var rows: Rows.flatten(view, filterText, opened_)
 
-    // The flattened list the keyboard actually moves through.
-    readonly property var rows: Rows.flatten(view, filterText, collapsed)
-
-    property color background: Color.menu.background
-    property color foreground: Color.menu.text
-    property var borderSpec: Border.surfaceSpec(
-        "menu",
-        "border",
-        Color.menu.border,
-        Math.max(1, Style.space(2))
-    )
+    readonly property color foreground: Color.menu.text
+    readonly property color dim: Qt.darker(foreground, 1.4)
+    readonly property string fontFamily: Style.font.menuFamily
 
     function open() {
         opened = true;
-        selectedIndex = 0;
+        filterText = "";
+        selectedIndex = firstSelectable(0, 1);
         Qt.callLater(function () {
             keyCatcher.forceActiveFocus();
         });
@@ -59,9 +55,9 @@ Item {
         opened ? close() : open();
     }
 
-    // The theme gives us three roles and no palette of named colours, which
-    // suits a three-state vocabulary: alarm, attention, and calm. A healthy
-    // monitor is deliberately the quietest thing on screen.
+    // Three states, three colours: alarm, attention, and confirmed-fine. Grey is
+    // deliberately not used for "up" — grey is what "we don't know" looks like,
+    // and this plugin has a real unknown state to spend it on.
     function statusColor(status) {
         if (status === "down") {
             return Color.urgent;
@@ -69,7 +65,19 @@ Item {
         if (status === "degraded") {
             return Color.accent;
         }
-        return Color.muted;
+        var ok = service ? service.okColor : Color.muted;
+        // Calm, but still an assertion: this was checked and it passed.
+        return Qt.rgba(ok.r, ok.g, ok.b, 0.8);
+    }
+
+    /** The next row the keyboard is allowed to land on. Headings are skipped. */
+    function firstSelectable(from, step) {
+        for (var i = from; i >= 0 && i < rows.length; i += step) {
+            if (rows[i].selectable) {
+                return i;
+            }
+        }
+        return from;
     }
 
     function select(delta) {
@@ -77,29 +85,33 @@ Item {
             return;
         }
         var next = selectedIndex + delta;
-        selectedIndex = Math.max(0, Math.min(rows.length - 1, next));
-        list.positionViewAtIndex(selectedIndex, ListView.Contain);
+        if (next < 0 || next >= rows.length) {
+            return;
+        }
+        var landed = firstSelectable(next, delta > 0 ? 1 : -1);
+        if (rows[landed] && rows[landed].selectable) {
+            selectedIndex = landed;
+            list.positionViewAtIndex(selectedIndex, ListView.Contain);
+        }
     }
 
     function activate() {
         var row = rows[selectedIndex];
-        if (!row) {
+        if (!row || !row.selectable) {
             return;
         }
         if (row.type === "group") {
             var next = {};
-            for (var key in collapsed) {
-                next[key] = collapsed[key];
+            for (var key in opened_) {
+                next[key] = opened_[key];
             }
             next[row.id] = !next[row.id];
-            collapsed = next;
+            opened_ = next;
             return;
         }
         // A monitor row opens where the operator can actually do something.
-        Quickshell.execDetached([
-            "xdg-open",
-            (service ? service.baseUrl.replace(/\/$/, "") : "") + "/dashboard/" + row.id,
-        ]);
+        var base = service ? String(service.baseUrl).replace(/\/+$/, "") : "";
+        Quickshell.execDetached(["xdg-open", base + "/dashboard/" + row.id]);
         close();
     }
 
@@ -109,6 +121,8 @@ Item {
             expandedId = expandedId === row.id ? 0 : row.id;
         }
     }
+
+    onRowsChanged: if (rows.length && !rows[selectedIndex]) selectedIndex = firstSelectable(0, 1)
 
     IpcHandler {
         target: "scoop.uptime-kuma"
@@ -157,13 +171,19 @@ Item {
 
         BorderSurface {
             id: card
-            width: Math.min(Style.space(760), panel.width - Style.gapsOut * 2)
-            height: Math.min(Style.space(620), panel.height - Style.gapsOut * 2)
+            // A card, not a takeover. space(380) is the house panel width; this
+            // one carries a tree and an error line, so it runs a little wider.
+            width: Math.min(Style.space(440), panel.width - Style.space(40))
+            height: Math.min(Style.space(520), panel.height - Style.space(40))
             radius: Style.space(12)
             anchors.centerIn: parent
-            color: root.background
-            borderSpec: root.borderSpec
-            padding: Style.spacing.panelPadding
+            color: Color.menu.background
+            borderSpec: Border.surfaceSpec(
+                "menu",
+                "border",
+                Color.menu.border,
+                Math.max(1, Style.space(2))
+            )
 
             MouseArea {
                 anchors.fill: parent
@@ -172,7 +192,13 @@ Item {
 
             Item {
                 id: keyCatcher
+                // BorderSurface exposes its insets rather than laying children
+                // out; anchoring to them is what keeps content off the border.
                 anchors.fill: parent
+                anchors.topMargin: card.contentTopInset + Style.space(14)
+                anchors.bottomMargin: card.contentBottomInset + Style.space(14)
+                anchors.leftMargin: card.contentLeftInset + Style.space(14)
+                anchors.rightMargin: card.contentRightInset + Style.space(14)
                 focus: true
 
                 Keys.priority: Keys.BeforeItem
@@ -180,7 +206,7 @@ Item {
                     if (event.key === Qt.Key_Escape) {
                         if (root.filterText) {
                             root.filterText = "";
-                            root.selectedIndex = 0;
+                            root.selectedIndex = root.firstSelectable(0, 1);
                         } else {
                             root.close();
                         }
@@ -199,156 +225,216 @@ Item {
                         event.accepted = true;
                     } else if (Util.editsFilter(event, root.filterText)) {
                         root.filterText = Util.editedFilter(event, root.filterText);
-                        root.selectedIndex = 0;
-                        event.accepted = true;
-                    } else if (
-                        event.text &&
-                        event.text.length === 1 &&
-                        event.text.charCodeAt(0) >= 32 &&
-                        event.text.charCodeAt(0) !== 127
-                    ) {
-                        root.filterText = root.filterText + event.text;
-                        root.selectedIndex = 0;
+                        root.selectedIndex = root.firstSelectable(0, 1);
                         event.accepted = true;
                     }
                 }
 
-                Column {
+                ColumnLayout {
                     anchors.fill: parent
-                    spacing: Style.spacing.md
+                    spacing: Style.space(12)
 
-                    // ------------------------------------------------ summary
-                    Row {
-                        width: parent.width
-                        spacing: Style.spacing.sm
-
-                        Text {
-                            text: {
-                                if (root.connection === "setup") {
-                                    return "Not configured";
-                                }
-                                if (!root.view) {
-                                    return "Connecting…";
-                                }
-                                var c = root.view.counts;
-                                return (
-                                    c.up +
-                                    " up · " +
-                                    c.down +
-                                    " down · " +
-                                    c.degraded +
-                                    " degraded · " +
-                                    c.paused +
-                                    " paused"
-                                );
+                    PanelHero {
+                        Layout.fillWidth: true
+                        title: "Uptime Kuma"
+                        meta: {
+                            if (root.connection === "setup") {
+                                return "Not configured";
                             }
-                            color: root.foreground
-                            font.pixelSize: Style.font.title
-                            font.family: Style.font.family
-                            textFormat: Text.PlainText
+                            if (!root.view) {
+                                return "Connecting…";
+                            }
+                            var c = root.view.counts;
+                            var parts = [c.up + " up"];
+                            if (c.down > 0) {
+                                parts.push(c.down + " down");
+                            }
+                            if (c.degraded > 0) {
+                                parts.push(c.degraded + " degraded");
+                            }
+                            if (c.paused > 0) {
+                                parts.push(c.paused + " paused");
+                            }
+                            return parts.join(" · ");
+                        }
+                        detail: root.filterText === "" ? "" : "Filtering: " + root.filterText
+                        foreground: root.foreground
+                        fontFamily: root.fontFamily
+                        iconComponent: Component {
+                            Text {
+                                text: "\uf21e"
+                                color:
+                                    root.connection === "unreachable"
+                                        ? root.dim
+                                        : root.view && root.view.counts.down > 0
+                                          ? Color.urgent
+                                          : root.foreground
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.display
+                            }
                         }
                     }
 
                     // Stale data must announce itself. A healthy-looking pane
-                    // that is simply out of date is the one lie this must not
+                    // that is merely out of date is the one lie this must not
                     // tell.
                     Rectangle {
-                        width: parent.width
-                        height: visible ? staleText.implicitHeight + Style.spacing.sm * 2 : 0
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: staleText.implicitHeight + Style.space(14)
                         visible: root.connection === "unreachable"
-                        color: Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.15)
+                        color: Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.14)
                         radius: Style.space(6)
 
                         Text {
                             id: staleText
                             anchors.centerIn: parent
-                            text: "Can't reach Uptime Kuma — showing the last known state."
+                            text: "Can't reach Uptime Kuma — showing the last known state"
                             color: root.foreground
+                            font.family: root.fontFamily
                             font.pixelSize: Style.font.caption
                             textFormat: Text.PlainText
                         }
                     }
 
-                    Text {
-                        visible: root.filterText !== ""
-                        text: "filter: " + root.filterText
-                        color: Color.muted
-                        font.pixelSize: Style.font.caption
-                        textFormat: Text.PlainText
+                    PanelSeparator {
+                        Layout.fillWidth: true
+                        foreground: root.foreground
                     }
 
-                    // -------------------------------------------------- rows
                     ListView {
                         id: list
-                        width: parent.width
-                        height: parent.height - y
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         clip: true
+                        spacing: Style.space(2)
                         model: root.rows
                         currentIndex: root.selectedIndex
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                        }
 
-                        delegate: Rectangle {
+                        delegate: Item {
+                            id: rowItem
                             required property var modelData
                             required property int index
 
+                            readonly property bool isSection: modelData.type === "section"
+                            readonly property bool isGroup: modelData.type === "group"
+                            readonly property bool selected: index === root.selectedIndex && modelData.selectable
+                            readonly property bool showsError: modelData.error !== "" && modelData.status === "down"
+
                             width: list.width
-                            height: rowColumn.implicitHeight + Style.spacing.sm
-                            color: index === root.selectedIndex ? Color.menu.selectedBackground : "transparent"
-                            radius: Style.space(4)
+                            implicitHeight: isSection
+                                ? sectionLabel.implicitHeight + Style.space(14)
+                                : rowBody.implicitHeight + Style.space(9)
 
-                            Column {
-                                id: rowColumn
-                                width: parent.width - Style.spacing.sm * 2
-                                x: Style.spacing.sm
-                                y: Style.spacing.sm / 2
-                                spacing: Style.space(2)
+                            // ------------------------------------------ heading
+                            PanelSectionHeader {
+                                id: sectionLabel
+                                visible: rowItem.isSection
+                                anchors.left: parent.left
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: Style.space(4)
+                                text: rowItem.modelData.label.toUpperCase()
+                                foreground: root.foreground
+                                fontFamily: root.fontFamily
+                            }
 
-                                Row {
-                                    spacing: Style.spacing.sm
+                            // --------------------------------------------- row
+                            Rectangle {
+                                visible: !rowItem.isSection
+                                anchors.fill: parent
+                                radius: Style.space(6)
+                                color: rowItem.selected ? Color.menu.selectedBackground : "transparent"
+                            }
 
-                                    Rectangle {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: Style.space(8)
-                                        height: Style.space(8)
-                                        radius: width / 2
-                                        color: root.statusColor(modelData.status)
-                                    }
+                            MouseArea {
+                                visible: !rowItem.isSection
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onEntered: if (rowItem.modelData.selectable) root.selectedIndex = rowItem.index
+                                onClicked: {
+                                    root.selectedIndex = rowItem.index;
+                                    root.activate();
+                                }
+                            }
+
+                            RowLayout {
+                                id: rowBody
+                                visible: !rowItem.isSection
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: Style.space(rowItem.isGroup ? 8 : 20)
+                                anchors.rightMargin: Style.space(10)
+                                spacing: Style.space(8)
+
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    width: Style.space(7)
+                                    height: Style.space(7)
+                                    radius: width / 2
+                                    color: root.statusColor(rowItem.modelData.status)
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: Style.space(1)
 
                                     Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: modelData.label
-                                        color:
-                                            index === root.selectedIndex
-                                                ? Color.menu.selectedText
-                                                : root.foreground
+                                        Layout.fillWidth: true
+                                        text: rowItem.modelData.label
+                                        color: rowItem.selected ? Color.menu.selectedText : root.foreground
+                                        font.family: root.fontFamily
                                         font.pixelSize: Style.font.body
-                                        font.bold: modelData.type !== "monitor"
+                                        font.bold: rowItem.isGroup
+                                        elide: Text.ElideRight
                                         textFormat: Text.PlainText
                                     }
 
+                                    // The error text: the reason this plugin
+                                    // uses the socket interface at all.
                                     Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: modelData.detail
-                                        color: Color.muted
+                                        Layout.fillWidth: true
+                                        visible: rowItem.showsError
+                                        text: rowItem.modelData.error
+                                        color: Color.urgent
+                                        font.family: root.fontFamily
                                         font.pixelSize: Style.font.caption
+                                        wrapMode: root.expandedId === rowItem.modelData.id ? Text.WordWrap : Text.NoWrap
+                                        maximumLineCount: root.expandedId === rowItem.modelData.id ? 6 : 1
+                                        elide: Text.ElideRight
                                         textFormat: Text.PlainText
                                     }
                                 }
 
-                                // The error text: the whole reason this plugin
-                                // uses the socket interface at all.
                                 Text {
-                                    visible: modelData.error !== "" && modelData.status === "down"
-                                    width: rowColumn.width
-                                    text: modelData.error
-                                    color: Color.urgent
+                                    Layout.alignment: Qt.AlignVCenter
+                                    text: rowItem.modelData.detail
+                                    color: root.dim
+                                    font.family: root.fontFamily
                                     font.pixelSize: Style.font.caption
-                                    wrapMode: Text.WordWrap
-                                    maximumLineCount: root.expandedId === modelData.id ? 6 : 1
-                                    elide: Text.ElideRight
                                     textFormat: Text.PlainText
                                 }
                             }
                         }
+                    }
+
+                    PanelSeparator {
+                        Layout.fillWidth: true
+                        foreground: root.foreground
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "type to filter · ↑↓ move · enter open · space expand · esc close"
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        horizontalAlignment: Text.AlignHCenter
+                        textFormat: Text.PlainText
                     }
                 }
             }
