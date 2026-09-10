@@ -111,7 +111,10 @@ BarWidget {
             text: String(root.downCount)
             font.family: bar ? bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.body
-            color: Color.urgent
+            // While we cannot reach Uptime Kuma this count is the last thing we
+            // were told, not what is true now. It should not look as certain as
+            // the glyph beside it admits we are not.
+            color: root.connection === "unreachable" ? Color.muted : Color.urgent
             textFormat: Text.PlainText
         }
     }
