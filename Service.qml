@@ -37,6 +37,9 @@ Item {
 
     property var _monitors: ({})
     property var _beats: ({})
+    // What Uptime Kuma reports beside the heartbeats: 24-hour uptime, average
+    // latency, and how long a certificate has left. Keyed by monitor id.
+    property var _stats: ({})
     property string _token: ""
     property int _backoffMs: 1000
 
@@ -217,6 +220,14 @@ Item {
             }
         }
         onExited: function (exitCode) {
+            // 2 means the stored token was refused — usually the Uptime Kuma
+            // password changed, which invalidates it by design. Retrying that
+            // forever would be pointless; the operator has to sign in again.
+            if (exitCode === 2) {
+                root.lastError = "Your session expired — sign in again";
+                root.forget();
+                return;
+            }
             if (root.connection !== "setup") {
                 root.connection = "unreachable";
                 retryTimer.interval = root._backoffMs;
@@ -286,7 +297,35 @@ Item {
             _beats = all;
             return true;
         }
+        // Uptime Kuma volunteers these three alongside the heartbeats and they
+        // were being dropped on the floor. They are the difference between
+        // knowing a monitor is Up and knowing whether that is normal for it.
+        if (event === "uptime") {
+            return _fold(Model.applyUptime(_stats, args[0], args[1], args[2]));
+        }
+        if (event === "avgPing") {
+            return _fold(Model.applyAvgPing(_stats, args[0], args[1]));
+        }
+        if (event === "certInfo") {
+            return _fold(Model.applyCertInfo(_stats, args[0], args[1]));
+        }
         return false;
+    }
+
+    /**
+     * Take an amended stats map, if it was amended at all.
+     *
+     * The fold functions hand back the map they were given when the event said
+     * nothing we render — an uptime figure for a period we do not show, a
+     * certificate for a monitor that has none — and that is what "unchanged"
+     * looks like here.
+     */
+    function _fold(next) {
+        if (next === _stats) {
+            return false;
+        }
+        _stats = next;
+        return true;
     }
 
     // Events arrive in bursts — the login snapshot alone is nearly ninety of
@@ -296,7 +335,9 @@ Item {
         id: rebuildTimer
         interval: 120
         repeat: false
-        onTriggered: root.view = Model.buildView(root._monitors, root._beats)
+        onTriggered: {
+            root.view = Model.buildView(root._monitors, root._beats, root._stats, Date.now());
+        }
     }
 
     // -------------------------------------------------------------------- ipc

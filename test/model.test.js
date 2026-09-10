@@ -125,3 +125,43 @@ test("a monitor carries the error text of its last heartbeat", () => {
 
     expect(view.problems[0].error).toBe("connect ECONNREFUSED");
 });
+
+test("a monitor says how long it has held its status, so a blip reads apart from an outage", () => {
+    const failing = [
+        { status: 1, time: "2026-09-10 11:00:00" },
+        { status: 0, time: "2026-09-10 11:30:00", msg: "ECONNREFUSED" },
+        { status: 0, time: "2026-09-10 11:40:00", msg: "ECONNREFUSED" },
+    ];
+    const now = Date.UTC(2026, 8, 10, 12, 0, 0);
+    const view = buildView(monitors, { 2: failing }, {}, now);
+
+    expect(view.problems[0].statusText).toBe("Down");
+    expect(view.problems[0].held).toBe("for 30m");
+    expect(view.problems[0].since).toBe("2026-09-10 11:30:00");
+});
+
+test("a monitor carries the figures Uptime Kuma reports beside its heartbeats", () => {
+    const stats = { 2: { uptime24: 0.9987, avgPing: 31, certDays: 21 } };
+    const view = buildView(monitors, { 2: [beat(1)] }, stats);
+    const row = view.groups.find((g) => g.id === 1).children.find((m) => m.id === 2);
+
+    expect(row.uptimeText).toBe("99.87%");
+    expect(row.avgPingText).toBe("31 ms");
+    expect(row.certText).toBe("21 days");
+});
+
+test("figures Uptime Kuma has not sent are blank, never guessed at", () => {
+    const view = buildView(monitors, { 2: [beat(1)] }, {});
+    const row = view.groups.find((g) => g.id === 1).children.find((m) => m.id === 2);
+
+    expect(row.uptimeText).toBe("");
+    expect(row.avgPingText).toBe("");
+    expect(row.certText).toBe("");
+});
+
+test("a monitor carries its recent heartbeats as sparkline samples", () => {
+    const view = buildView(monitors, { 2: [beat(1), beat(0)] }, {});
+    const row = view.groups.find((g) => g.id === 1).children.find((m) => m.id === 2);
+
+    expect(row.samples.map((s) => s.status)).toEqual(["up", "down"]);
+});

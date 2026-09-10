@@ -46,6 +46,9 @@ function monitorRow(monitor, detail) {
         detail: detail,
         status: monitor.status,
         error: monitor.error || "",
+        // The whole monitor rides along, so the Pane can hand the selected row
+        // to the detail view without going back to the model to look it up.
+        monitor: monitor,
         selectable: true,
     };
 }
@@ -59,6 +62,7 @@ function sectionRow(id, label, status) {
         detail: "",
         status: status,
         error: "",
+        monitor: null,
         selectable: false,
     };
 }
@@ -139,6 +143,9 @@ function flatten(view, filterText, opened) {
             detail: groupDetail(group.children),
             status: group.status,
             error: "",
+            // A Group is a place, not a thing that was checked: it has no
+            // heartbeats of its own worth detailing.
+            monitor: null,
             selectable: true,
         });
 

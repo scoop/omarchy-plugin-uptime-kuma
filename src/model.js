@@ -97,23 +97,337 @@ function byName(items) {
     });
 }
 
+/** How Status is written when it is shown as a word rather than a colour. */
+var STATUS_LABEL = { up: "Up", degraded: "Degraded", down: "Down" };
+
+/** How many heartbeats the sparkline draws, and what Uptime Kuma keeps. */
+var WINDOW = 100;
+
 /**
- * One monitor, reduced to what the Pane renders.
+ * Read one of Uptime Kuma's heartbeat times.
+ *
+ * The server writes them in UTC without saying so — "2026-09-10 22:15:03" —
+ * and a bare string like that is local time to `Date`, which would put every
+ * duration out by the operator's offset. So it is parsed by hand and only
+ * handed to `Date` when it carries a zone of its own.
+ *
+ * @param {string} text a heartbeat `time`
+ * @returns {number|null} milliseconds since the epoch, or null if unreadable
+ */
+function parseTime(text) {
+    var stamp = String(text || "").trim();
+    var match =
+        /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/.exec(
+            stamp,
+        );
+    if (!match) {
+        return null;
+    }
+    if (match[7]) {
+        // It says which zone it is in, so Date can be trusted with it.
+        var parsed = Date.parse(stamp.replace(" ", "T"));
+        return isNaN(parsed) ? null : parsed;
+    }
+    return Date.UTC(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        Number(match[4]),
+        Number(match[5]),
+        Number(match[6]),
+    );
+}
+
+/**
+ * An elapsed span, in the largest two units that still carry information.
+ *
+ * Seconds stop mattering once there are minutes of them, and minutes once
+ * there are days: an outage is triaged by its order of magnitude.
+ *
+ * @param {number} ms the span
+ * @returns {string} e.g. "42s", "9m", "3h 11m", "2d 5h"
+ */
+function formatDuration(ms) {
+    // A local clock ahead of the server would otherwise read as a negative age.
+    var seconds = Math.max(0, Math.floor((ms || 0) / 1000));
+    if (seconds < 60) {
+        return seconds + "s";
+    }
+    var minutes = Math.floor(seconds / 60);
+    if (minutes < 60) {
+        return minutes + "m";
+    }
+    var hours = Math.floor(minutes / 60);
+    if (hours < 24) {
+        var restMinutes = minutes % 60;
+        return restMinutes === 0 ? hours + "h" : hours + "h " + restMinutes + "m";
+    }
+    var days = Math.floor(hours / 24);
+    var restHours = hours % 24;
+    return restHours === 0 ? days + "d" : days + "d " + restHours + "h";
+}
+
+/**
+ * When the Status a monitor holds now began.
+ *
+ * Walks back from the newest heartbeat while the Status it reports is
+ * unchanged. Status, not the raw code: a monitor that retried and then entered
+ * maintenance has been Degraded throughout, and saying otherwise would restart
+ * the clock on a problem that never went away.
  *
  * @param {object} monitor a monitor as it appears in `monitorList`
  * @param {Array} beats its heartbeat history, oldest first
+ * @returns {string|null} the `time` of the earliest heartbeat in that run
+ */
+function statusSince(monitor, beats) {
+    var history = beats || [];
+    if (history.length === 0) {
+        return null;
+    }
+    var current = statusOf(monitor, history[history.length - 1]);
+    var earliest = null;
+    for (var i = history.length - 1; i >= 0; i--) {
+        if (statusOf(monitor, history[i]) !== current) {
+            break;
+        }
+        earliest = history[i];
+    }
+    return earliest && earliest.time ? earliest.time : null;
+}
+
+/**
+ * How long the current Status has held, phrased for the line it sits on.
+ *
+ * A run reaching the oldest heartbeat we hold is only a lower bound — Uptime
+ * Kuma sends a hundred and no more — and says so. Reporting the window as the
+ * age would tell an operator a month-old service came up an hour ago.
+ *
+ * @param {object} monitor a monitor as it appears in `monitorList`
+ * @param {Array} beats its heartbeat history, oldest first
+ * @param {number} nowMs the current time
+ * @returns {string} e.g. "for 3h 11m", "for at least 2d 5h", or "" if unknown
+ */
+function heldText(monitor, beats, nowMs) {
+    var history = beats || [];
+    var since = parseTime(statusSince(monitor, history));
+    if (since === null) {
+        return "";
+    }
+    var bounded =
+        history.length >= WINDOW &&
+        statusOf(monitor, history[0]) === statusOf(monitor, history[history.length - 1]);
+    return (bounded ? "for at least " : "for ") + formatDuration(nowMs - since);
+}
+
+/**
+ * An uptime ratio as a percentage, keeping only the digits that differ.
+ *
+ * Two decimals is where Uptime Kuma's own figures stop being noise, and a
+ * whole number keeps no decimals at all: "95%" reads faster than "95.00%".
+ *
+ * @param {number|null} ratio 0.0–1.0, as `uptime` reports it
+ * @returns {string} e.g. "99.87%", or "" when nothing has been reported
+ */
+function formatPercent(ratio) {
+    if (typeof ratio !== "number" || isNaN(ratio)) {
+        return "";
+    }
+    return Math.round(ratio * 10000) / 100 + "%";
+}
+
+/**
+ * A latency in whole milliseconds.
+ *
+ * @param {number|null} ms a `ping`, or an `avgPing`
+ * @returns {string} e.g. "12 ms", or "" when nothing was measured
+ */
+function formatLatency(ms) {
+    if (typeof ms !== "number" || isNaN(ms)) {
+        return "";
+    }
+    return Math.round(ms) + " ms";
+}
+
+/**
+ * What a certificate has left, said plainly.
+ *
+ * @param {number|null} days `certInfo.daysRemaining`
+ * @returns {string} e.g. "21 days", "expired", or "" when there is no
+ *     certificate to speak of
+ */
+function formatCertDays(days) {
+    if (typeof days !== "number" || isNaN(days)) {
+        return "";
+    }
+    if (days <= 0) {
+        return "expired";
+    }
+    return days === 1 ? "1 day" : days + " days";
+}
+
+/**
+ * Recent heartbeats reduced to what a sparkline draws.
+ *
+ * Height is latency against the slowest check in the window, so a service
+ * getting steadily worse shows it before it fails. A failure is drawn full
+ * height whatever it measured: the eye should land on the gap, not read it as
+ * a fast check.
+ *
+ * @param {object} monitor a monitor as it appears in `monitorList`
+ * @param {Array} beats its heartbeat history, oldest first
+ * @returns {Array} `{status, level}` per heartbeat, oldest first, at most 100
+ */
+function sparkline(monitor, beats) {
+    var history = beats || [];
+    if (history.length > WINDOW) {
+        history = history.slice(history.length - WINDOW);
+    }
+
+    var slowest = 0;
+    var i;
+    for (i = 0; i < history.length; i++) {
+        if (typeof history[i].ping === "number" && history[i].ping > slowest) {
+            slowest = history[i].ping;
+        }
+    }
+
+    var samples = [];
+    for (i = 0; i < history.length; i++) {
+        var status = statusOf(monitor, history[i]);
+        var level;
+        if (status === "down") {
+            level = 1;
+        } else if (typeof history[i].ping === "number" && slowest > 0) {
+            // A floor of 0.15 so the quickest check is still a mark on the
+            // page rather than a gap indistinguishable from a failure.
+            level = Math.round((0.15 + 0.85 * (history[i].ping / slowest)) * 1000) / 1000;
+        } else {
+            level = 0.35;
+        }
+        samples.push({ status: status, level: level });
+    }
+    return samples;
+}
+
+/** A copy of the stats map with one monitor's entry amended. */
+function _withStat(stats, monitorId, key, value) {
+    var next = {};
+    var id;
+    for (id in stats) {
+        if (Object.prototype.hasOwnProperty.call(stats, id)) {
+            next[id] = stats[id];
+        }
+    }
+    var entry = { uptime24: null, avgPing: null, certDays: null };
+    var existing = stats[String(monitorId)];
+    if (existing) {
+        entry.uptime24 = existing.uptime24;
+        entry.avgPing = existing.avgPing;
+        entry.certDays = existing.certDays;
+    }
+    entry[key] = value;
+    next[String(monitorId)] = entry;
+    return next;
+}
+
+/**
+ * Fold an `uptime` event in.
+ *
+ * Uptime Kuma reports 24 hours, 30 days and a year; only the day is kept,
+ * because only the day answers "is this normal for it right now".
+ *
+ * @param {object} stats the stats map
+ * @param {number} monitorId which monitor
+ * @param {number|string} period `24`, `720` or `"1y"`
+ * @param {number} ratio 0.0–1.0
+ * @returns {object} an amended map, or the one given when nothing was recorded
+ */
+function applyUptime(stats, monitorId, period, ratio) {
+    if (String(period) !== "24" || typeof ratio !== "number") {
+        return stats;
+    }
+    return _withStat(stats, monitorId, "uptime24", ratio);
+}
+
+/**
+ * Fold an `avgPing` event in.
+ *
+ * @param {object} stats the stats map
+ * @param {number} monitorId which monitor
+ * @param {number} ms the average over the last 24 hours
+ * @returns {object} an amended map, or the one given when nothing was recorded
+ */
+function applyAvgPing(stats, monitorId, ms) {
+    if (typeof ms !== "number" || isNaN(ms)) {
+        return stats;
+    }
+    return _withStat(stats, monitorId, "avgPing", ms);
+}
+
+/**
+ * Fold a `certInfo` event in.
+ *
+ * The event carries a JSON string describing the whole chain; all that is kept
+ * is how long the leaf has left, which is the only part of it that becomes an
+ * outage on a date nobody wrote down.
+ *
+ * @param {object} stats the stats map
+ * @param {number} monitorId which monitor
+ * @param {string} tlsInfoJson the event's payload
+ * @returns {object} an amended map, or the one given when nothing was recorded
+ */
+function applyCertInfo(stats, monitorId, tlsInfoJson) {
+    var info;
+    try {
+        info = JSON.parse(String(tlsInfoJson || ""));
+    } catch (e) {
+        info = null;
+    }
+    if (!info || !info.certInfo || typeof info.certInfo.daysRemaining !== "number") {
+        return stats;
+    }
+    return _withStat(stats, monitorId, "certDays", info.certInfo.daysRemaining);
+}
+
+/**
+ * One monitor, reduced to what the Pane renders.
+ *
+ * Everything the detail view shows is derived here rather than there: the
+ * Pane owns no arithmetic, and every line of this is testable without a shell.
+ *
+ * @param {object} monitor a monitor as it appears in `monitorList`
+ * @param {Array} beats its heartbeat history, oldest first
+ * @param {object} stat what `uptime`, `avgPing` and `certInfo` said about it
+ * @param {number} nowMs the current time
  * @returns {object} the row
  */
-function toRow(monitor, beats) {
+function toRow(monitor, beats, stat, nowMs) {
     var history = beats || [];
     var last = history.length ? history[history.length - 1] : null;
+    var extra = stat || {};
+    var status = statusOf(monitor, last);
+    var ping = last && typeof last.ping === "number" ? last.ping : null;
+    var uptime24 = typeof extra.uptime24 === "number" ? extra.uptime24 : null;
+    var avgPing = typeof extra.avgPing === "number" ? extra.avgPing : null;
+    var certDays = typeof extra.certDays === "number" ? extra.certDays : null;
     return {
         id: monitor.id,
         name: monitor.name,
-        status: statusOf(monitor, last),
+        status: status,
+        statusText: STATUS_LABEL[status],
         error: last && last.msg ? last.msg : "",
-        ping: last && typeof last.ping === "number" ? last.ping : null,
+        ping: ping,
+        latencyText: formatLatency(ping),
         time: last ? last.time : null,
+        since: statusSince(monitor, history),
+        held: heldText(monitor, history, nowMs),
+        uptime24: uptime24,
+        uptimeText: formatPercent(uptime24),
+        avgPing: avgPing,
+        avgPingText: formatLatency(avgPing),
+        certDays: certDays,
+        certText: formatCertDays(certDays),
+        samples: sparkline(monitor, history),
         beats: history,
     };
 }
@@ -127,10 +441,14 @@ function toRow(monitor, beats) {
  *
  * @param {object} monitorList monitors keyed by id, as Uptime Kuma sends them
  * @param {object} beatsById heartbeat history keyed by monitor id
+ * @param {object} statsById uptime, latency and certificate figures by id
+ * @param {number} nowMs the current time, against which ages are measured
  * @returns {object} `{groups, ungrouped, problems, counts}`
  */
-function buildView(monitorList, beatsById) {
+function buildView(monitorList, beatsById, statsById, nowMs) {
     var beats = beatsById || {};
+    var stats = statsById || {};
+    var now = typeof nowMs === "number" ? nowMs : Date.now();
     var all = [];
     var key;
     for (key in monitorList) {
@@ -176,7 +494,7 @@ function buildView(monitorList, beatsById) {
         if (m.type === "group") {
             continue;
         }
-        var row = toRow(m, beats[m.id]);
+        var row = toRow(m, beats[m.id], stats[m.id], now);
         counts[row.status]++;
         counts.total++;
         if (row.status === "down") {
@@ -216,5 +534,16 @@ if (typeof module !== "undefined") {
         statusOf: statusOf,
         worstStatus: worstStatus,
         buildView: buildView,
+        parseTime: parseTime,
+        formatDuration: formatDuration,
+        formatPercent: formatPercent,
+        formatLatency: formatLatency,
+        formatCertDays: formatCertDays,
+        statusSince: statusSince,
+        heldText: heldText,
+        sparkline: sparkline,
+        applyUptime: applyUptime,
+        applyAvgPing: applyAvgPing,
+        applyCertInfo: applyCertInfo,
     };
 }

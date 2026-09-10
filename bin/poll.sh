@@ -54,6 +54,30 @@ post '40' || die "Could not open the socket namespace"
 packet="$(jq -cn --arg t "$token" '["loginByToken", $t]')"
 post "420$packet" || die "Could not present the session token"
 
+# A refused token does not close the socket: the server simply never sends a
+# snapshot, so an unchecked session would poll forever looking connected but
+# empty. Read the acknowledgement and say so, with a distinct exit code the
+# caller can turn into "ask for credentials again" rather than "retry later".
+for _ in 1 2 3 4 5 6; do
+    ack_body="$("${curl_common[@]}" "$session")" || die "Connection lost during sign-in"
+    ack_seen=""
+    while IFS= read -r frame; do
+        [[ "$frame" == 2 ]] && post '3'
+        [[ "$frame" == 43* ]] || continue
+        ack_seen="yes"
+        payload="${frame#43}"
+        payload="${payload#"${payload%%[![:digit:]]*}"}"
+        if [[ "$(jq -r '.[0].ok // false' <<<"$payload" 2>/dev/null)" != "true" ]]; then
+            echo "Session token refused" >&2
+            exit 2
+        fi
+    done < <(tr '\036' '\n' <<<"$ack_body")
+    # The greeting arrives in the same batch as the acknowledgement; anything
+    # already streamed must still reach the caller.
+    [[ -n "$ack_body" ]] && printf '%s\n' "$ack_body"
+    [[ -n "$ack_seen" ]] && break
+done
+
 while :; do
     body="$("${curl_common[@]}" "$session")" || die "Connection lost"
 

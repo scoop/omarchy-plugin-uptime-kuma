@@ -37,22 +37,20 @@ omarchy plugin add https://github.com/scoop/omarchy-plugin-uptime-kuma --enable
 
 ## Configure
 
-The shell has no settings form for plugins yet, so the connection lives in
-`~/.config/omarchy/shell.json`, on this plugin's bar entry:
+Open the panel and fill in the form: the URL of your Uptime Kuma, your username,
+your password, and a two-factor code if your account has one.
 
-```json
-{ "id": "scoop.uptime-kuma", "baseUrl": "https://kuma.example.com", "username": "you" }
-```
+Your password is exchanged once for a session token and is never stored. The
+token goes into the login keyring; the URL and username are written to
+`~/.config/omarchy/shell.json`. Changing your Uptime Kuma password revokes the
+token, which asks you to sign in again — that is intended, not a fault.
 
-Then authenticate once. Your password is exchanged for a session token and is
-never stored:
+If the panel will not open — the shell is not running, or you are debugging a
+keyring problem — the same exchange is available from a terminal:
 
 ```bash
 ~/.config/omarchy/plugins/scoop.uptime-kuma/bin/authenticate.sh
 ```
-
-The token goes into the login keyring. Changing your Uptime Kuma password
-revokes it, which logs the plugin out — that is intended.
 
 ## Keybinding
 
@@ -76,7 +74,11 @@ Clicking the indicator opens the same view.
 Groups, monitors and problems are all listed alphabetically, so where a thing
 sits depends on what it is called rather than on when you created it.
 
-Selecting a row shows its full error message; the others stay on one line.
+Selecting a monitor shows its full error message plus how long it has held its
+current status, a heartbeat sparkline, 24-hour uptime, latency, and certificate
+expiry where Uptime Kuma reports one. Figures it has not reported are left out
+rather than shown as a dash — not having measured something is not a
+measurement.
 
 Groups are folded shut by default, so a healthy instance is a dozen rows rather
 than a wall of green. Anything down is pinned above the tree regardless, so

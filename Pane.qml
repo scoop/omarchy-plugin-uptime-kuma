@@ -41,13 +41,18 @@ Item {
         selectedIndex = firstSelectable(0, 1);
         disarmPointer();
         Qt.callLater(function () {
-            keyCatcher.forceActiveFocus();
+            if (setupForm.visible) {
+                setupForm.focusFirstField();
+            } else {
+                keyCatcher.forceActiveFocus();
+            }
         });
     }
 
     function close() {
         opened = false;
         filterText = "";
+        setupForm.reset();
     }
 
     function toggle() {
@@ -158,6 +163,11 @@ Item {
         return code >= 32 && code !== 127;
     }
 
+    // Whatever was typed before belongs to the list, not to a login screen.
+    // Clearing on the way in means a password can never be sitting in the
+    // filter line behind the form, or reappear when the form closes.
+    onConnectionChanged: if (connection === "setup") filterText = ""
+
     onRowsChanged: {
         disarmPointer();
         if (rows.length && !rows[selectedIndex]) {
@@ -182,6 +192,21 @@ Item {
         }
         function toggle(): void {
             root.toggle();
+        }
+
+        function inspect(): string {
+            var r = root.rows[root.selectedIndex];
+            return (
+                "rows=" + root.rows.length +
+                " idx=" + root.selectedIndex +
+                " type=" + (r ? r.type : "none") +
+                " label=" + (r ? r.label : "-") +
+                " hasMonitorField=" + (r && "monitor" in r ? "yes" : "no") +
+                " monitorNull=" + (r && r.monitor === null ? "yes" : "no") +
+                " samples=" + (r && r.monitor && r.monitor.samples ? r.monitor.samples.length : -1) +
+                " filterLen=" + root.filterText.length +
+                " setupVisible=" + setupForm.visible
+            );
         }
     }
 
@@ -244,6 +269,16 @@ Item {
 
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function (event) {
+                    // The form owns the keyboard while it is up, unconditionally.
+                    //
+                    // Gating this on the form actually holding focus was wrong:
+                    // if focus had not landed in a field yet, this catcher
+                    // treated the keys as filter input — and put the operator's
+                    // password on screen in the filter line. There is nothing to
+                    // filter while the form is up, so never take keys here.
+                    if (setupForm.visible) {
+                        return;
+                    }
                     if (event.key === Qt.Key_Escape) {
                         if (root.filterText) {
                             root.filterText = "";
@@ -347,8 +382,26 @@ Item {
                         foreground: root.foreground
                     }
 
+                    SetupForm {
+                        id: setupForm
+                        Layout.fillWidth: true
+                        visible: root.connection === "setup"
+                        service: root.service
+                        shell: root.shell
+                        moduleName: "scoop.uptime-kuma"
+                        foreground: root.foreground
+                        fontFamily: root.fontFamily
+                        onEscaped: keyCatcher.forceActiveFocus()
+                        onVisibleChanged: {
+                            if (visible && root.opened) {
+                                Qt.callLater(focusFirstField);
+                            }
+                        }
+                    }
+
                     ListView {
                         id: list
+                        visible: !setupForm.visible
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
@@ -471,6 +524,17 @@ Item {
                                 }
                             }
                         }
+                    }
+
+                    DetailView {
+                        Layout.fillWidth: true
+                        visible: !setupForm.visible
+                        monitor: root.rows[root.selectedIndex]
+                            ? root.rows[root.selectedIndex].monitor
+                            : null
+                        foreground: root.foreground
+                        fontFamily: root.fontFamily
+                        okColor: root.service ? root.service.okColor : Color.muted
                     }
 
                     PanelSeparator {

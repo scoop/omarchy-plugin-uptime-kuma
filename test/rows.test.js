@@ -34,6 +34,7 @@ test("a Problems section is announced, then its monitors", () => {
         detail: "",
         status: "down",
         error: "",
+        monitor: null,
         selectable: false,
     });
     expect(rows[1].id).toBe(1);
@@ -127,4 +128,18 @@ test("a healthy group shows only how many monitors it holds", () => {
     const rows = flatten(view, "", {});
 
     expect(rows.find((r) => r.type === "group" && r.id === 20).detail).toBe("1");
+});
+
+test("a monitor row carries the monitor itself, for the detail the pane shows", () => {
+    const rows = flatten(view, "", { 10: true });
+    const row = rows.find((r) => r.type === "monitor" && r.id === 2);
+
+    expect(row.monitor).toBe(view.groups[0].children[1]);
+});
+
+test("nothing but a monitor row has a monitor to detail", () => {
+    const rows = flatten(view, "", { 10: true });
+
+    expect(rows.find((r) => r.type === "section").monitor).toBe(null);
+    expect(rows.find((r) => r.type === "group").monitor).toBe(null);
 });
