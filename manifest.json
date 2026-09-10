@@ -1,0 +1,27 @@
+{
+    "schemaVersion": 1,
+    "id": "scoop.uptime-kuma",
+    "name": "Uptime Kuma",
+    "version": "0.1.0",
+    "author": "scoop",
+    "license": "MIT",
+    "kinds": ["service", "bar-widget", "panel"],
+    "keepLoaded": true,
+    "entryPoints": {
+        "service": "Service.qml",
+        "barWidget": "Indicator.qml",
+        "panel": "Pane.qml"
+    },
+    "barWidget": {
+        "displayName": "Uptime Kuma",
+        "description": "Operator view of an Uptime Kuma instance",
+        "category": "Network",
+        "allowMultiple": false,
+        "defaultSection": "right",
+        "defaults": { "baseUrl": "", "username": "" },
+        "schema": [
+            { "key": "baseUrl", "type": "string", "label": "Uptime Kuma URL" },
+            { "key": "username", "type": "string", "label": "Username" }
+        ]
+    }
+}
