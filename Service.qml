@@ -52,6 +52,12 @@ Item {
     readonly property int _tokenMaxChars: 8192
     readonly property int _replyMaxChars: 65536
     readonly property int _payloadMaxChars: 4000000
+    readonly property int _demoMaxBytes: 524288
+
+    // While the canned snapshot is on screen, the reconnect machinery has to
+    // stand down — otherwise stopping the poll looks like a lost connection and
+    // the retry drags the real instance back in.
+    property bool _demo: false
 
     readonly property string _pluginDir: Qt.resolvedUrl(".").toString().replace("file://", "")
 
@@ -259,6 +265,9 @@ Item {
             }
         }
         onExited: function (exitCode) {
+            if (root._demo) {
+                return;
+            }
             // 2 means the stored token was refused — usually the Uptime Kuma
             // password changed, which invalidates it by design. Retrying that
             // forever would be pointless; the operator has to sign in again.
@@ -276,10 +285,79 @@ Item {
         }
     }
 
+    /**
+     * Slide a canned history so it ends now.
+     *
+     * The snapshot is committed to the repository, so its timestamps are fixed
+     * while the clock is not. Left alone, a demo recorded last week claims
+     * every service came up last week — or, if the file was written slightly
+     * ahead of the reader, that everything changed state zero seconds ago.
+     */
+    function _rebase(beats) {
+        var parse = function (text) {
+            return Date.parse(String(text).replace(" ", "T") + "Z");
+        };
+        var newest = 0;
+        var key;
+        for (key in beats) {
+            var list = beats[key];
+            if (list.length) {
+                newest = Math.max(newest, parse(list[list.length - 1].time));
+            }
+        }
+        if (!newest) {
+            return beats;
+        }
+        var delta = Date.now() - newest;
+        for (key in beats) {
+            var history = beats[key];
+            for (var i = 0; i < history.length; i++) {
+                var shifted = new Date(parse(history[i].time) + delta);
+                history[i].time = shifted.toISOString().slice(0, 19).replace("T", " ");
+            }
+        }
+        return beats;
+    }
+
+    // A canned snapshot, for the preview screenshot and for anyone who wants to
+    // work on the panel without an Uptime Kuma to point it at. It replaces the
+    // in-memory state only: nothing is written, and a restart returns to the
+    // real instance.
+    Process {
+        id: demoProc
+        command: [
+            root._pluginDir + "bin/read-bounded.sh",
+            root._pluginDir + "demo/snapshot.json",
+            String(root._demoMaxBytes),
+        ]
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: {
+                if (text.length === 0 || text.length > root._demoMaxBytes) {
+                    root.lastError = "Could not read the demo snapshot";
+                    return;
+                }
+                var snapshot;
+                try {
+                    snapshot = JSON.parse(text);
+                } catch (e) {
+                    root.lastError = "The demo snapshot is not readable JSON";
+                    return;
+                }
+                root._monitors = snapshot.monitorList || {};
+                root._beats = root._rebase(snapshot.beats || {});
+                root._stats = snapshot.stats || {};
+                root.connection = "connected";
+                root.lastUpdate = Date.now();
+                root.view = Model.buildView(root._monitors, root._beats, root._stats, Date.now());
+            }
+        }
+    }
+
     Timer {
         id: retryTimer
         repeat: false
-        onTriggered: if (root.configured && root._token !== "") root.start()
+        onTriggered: if (!root._demo && root.configured && root._token !== "") root.start()
     }
 
     // ---------------------------------------------------------------- decoding
@@ -420,6 +498,12 @@ Item {
 
         function logout(): void {
             root.forget();
+        }
+
+        function demo(): void {
+            root._demo = true;
+            root.stop();
+            demoProc.running = true;
         }
     }
 }

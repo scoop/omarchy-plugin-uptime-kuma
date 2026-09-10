@@ -7,6 +7,8 @@ The bar stays empty while everything is healthy. When something breaks, an
 indicator appears; `Super + U` opens the full view, with whatever is broken
 pinned to the top and the error message Uptime Kuma actually recorded.
 
+![The panel, showing a failed check and the group it belongs to](preview.png)
+
 ## Why another one
 
 Two Uptime Kuma plugins already exist. Both are good at what they are, and both
@@ -100,6 +102,17 @@ does not apply. Saving a file hot-reloads the shell.
 bun test      # the wire codec, the domain model, the row builder
 bun run lint
 ```
+
+There is a canned snapshot for working on the panel without an Uptime Kuma to
+point it at, and for regenerating the screenshot above:
+
+```bash
+omarchy-shell uptime-kuma demo
+```
+
+It replaces the in-memory state only — nothing is written, and restarting the
+shell returns to the real instance. Its timestamps are slid to end at load time,
+so durations read sensibly however old the file is.
 
 The QML lives in three thin files; everything with logic in it is plain
 JavaScript under `src/`, so it can be tested without a running shell.
