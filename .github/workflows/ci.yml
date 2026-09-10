@@ -62,7 +62,9 @@ jobs:
                   done < <(jq -r '.kinds[]' manifest.json)
 
                   # A single symlink anywhere makes the installer refuse the plugin.
-                  found=$(find . -path ./.git -prune -o -type l -print)
+                  # Ask git rather than the filesystem: what ships is what is tracked,
+                  # and a CI checkout also carries node_modules, which never does.
+                  found=$(git ls-files -s | awk '$1 == "120000" { print $4 }')
                   [[ -z "$found" ]] || { echo "symlinks are not allowed in a plugin folder:"; echo "$found"; exit 1; }
 
                   echo "manifest ok: $id"
