@@ -32,7 +32,7 @@ trap 'rm -f "$jar"' EXIT
 # --max-time must outlast a long poll: the server holds the request open for
 # pingInterval (25s by default) before answering with a ping.
 curl_common=(curl -q -sS --proto '=https,http' --proto-redir '=https,http' --max-time 60
-    --max-filesize 20000000 -b "$jar" -c "$jar")
+    --max-filesize 4000000 -b "$jar" -c "$jar")
 
 endpoint="$url/socket.io/?EIO=4&transport=polling"
 

@@ -43,7 +43,7 @@ jar="$(mktemp)"
 trap 'rm -f "$jar"' EXIT
 
 curl_common=(curl -q -sS --proto '=https,http' --proto-redir '=https,http' --max-time 20
-    --max-filesize 20000000 -b "$jar" -c "$jar")
+    --max-filesize 4000000 -b "$jar" -c "$jar")
 
 endpoint="$url/socket.io/?EIO=4&transport=polling"
 

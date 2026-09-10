@@ -344,6 +344,7 @@ Item {
                         iconComponent: Component {
                             Text {
                                 text: "\uf21e"
+                                textFormat: Text.PlainText
                                 color:
                                     root.connection === "unreachable"
                                         ? root.dim

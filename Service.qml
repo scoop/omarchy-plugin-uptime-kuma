@@ -43,6 +43,16 @@ Item {
     property string _token: ""
     property int _backoffMs: 1000
 
+    // Everything crossing a process boundary gets a ceiling. A token is a few
+    // hundred bytes, the login helper answers with one small JSON object, and
+    // the largest thing Uptime Kuma has ever sent us in one batch is a quarter
+    // of a megabyte. These are generous, and they are applied before the value
+    // is parsed rather than after.
+    readonly property int _themeMaxBytes: 65536
+    readonly property int _tokenMaxChars: 8192
+    readonly property int _replyMaxChars: 65536
+    readonly property int _payloadMaxChars: 4000000
+
     readonly property string _pluginDir: Qt.resolvedUrl(".").toString().replace("file://", "")
 
     // The shell's palette keeps only foreground/background/accent/muted/urgent;
@@ -52,13 +62,36 @@ Item {
     // colour or settling for grey.
     property color okColor: Color.muted
 
+    // Watcher only. FileView follows symlinks, blocks on a FIFO and reads a file
+    // whole before any size check runs, and the theme directory is writable by
+    // anything running as this user — so it is used to learn *that* the file
+    // changed, never to read it. The read goes through a helper that carries
+    // its refusals on the open itself.
     FileView {
+        id: themeWatcher
         path: Color.currentThemePath + "/colors.toml"
         watchChanges: true
+        preload: false
+        blockAllReads: true
         printErrors: false
-        onLoaded: {
-            var match = /^[ \t]*green[ \t]*=[ \t]*["']?(#[0-9A-Fa-f]{6})/m.exec(text());
-            root.okColor = match ? match[1] : Color.muted;
+        onFileChanged: themeProc.running = true
+    }
+
+    Process {
+        id: themeProc
+        command: [root._pluginDir + "bin/read-bounded.sh", themeWatcher.path, String(root._themeMaxBytes)]
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: {
+                // The helper returns max + 1 bytes when the file is larger than
+                // it should be; that is a refusal, not something to parse.
+                if (text.length === 0 || text.length > root._themeMaxBytes) {
+                    root.okColor = Color.muted;
+                    return;
+                }
+                var match = /^[ \t]*green[ \t]*=[ \t]*["']?(#[0-9A-Fa-f]{6})/m.exec(text);
+                root.okColor = match ? match[1] : Color.muted;
+            }
         }
     }
 
@@ -67,7 +100,10 @@ Item {
 
     // ---------------------------------------------------------------- lifecycle
 
-    Component.onCompleted: readToken()
+    Component.onCompleted: {
+        readToken();
+        themeProc.running = true;
+    }
 
     onConfiguredChanged: if (configured && _token === "") readToken()
 
@@ -108,7 +144,7 @@ Item {
         stdout: StdioCollector {
             waitForEnd: true
             onStreamFinished: {
-                var value = text.trim();
+                var value = text.length > root._tokenMaxChars ? "" : text.trim();
                 if (value === "") {
                     root.connection = "setup";
                     return;
@@ -153,6 +189,9 @@ Item {
             onStreamFinished: {
                 var result = {};
                 try {
+                    if (text.length > root._replyMaxChars) {
+                        throw new Error("oversized reply");
+                    }
                     result = JSON.parse(text);
                 } catch (e) {
                     result = { ok: false, error: "Unreadable answer from the login helper" };
@@ -246,6 +285,13 @@ Item {
     // ---------------------------------------------------------------- decoding
 
     function _consume(line) {
+        // curl caps each response, but the ceiling belongs on this side of the
+        // pipe as well: the cap is on what we agree to hold, not on what the
+        // other end agrees to send.
+        if (line.length > _payloadMaxChars) {
+            root.lastError = "Ignored an oversized response from Uptime Kuma";
+            return;
+        }
         var packets = Engine.decodePayload(line);
         var changed = false;
 
