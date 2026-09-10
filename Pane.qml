@@ -39,6 +39,7 @@ Item {
         opened = true;
         filterText = "";
         selectedIndex = firstSelectable(0, 1);
+        disarmPointer();
         Qt.callLater(function () {
             keyCatcher.forceActiveFocus();
         });
@@ -78,6 +79,32 @@ Item {
         return from;
     }
 
+    /**
+     * Ignore hover until the pointer has actually moved.
+     *
+     * Rows shift under a stationary pointer whenever the list changes — a
+     * heartbeat arrives, a filter narrows, a group opens — and Qt reports that
+     * as hover. Without this, the keyboard selection is yanked to wherever the
+     * mouse happens to be resting.
+     */
+    function disarmPointer() {
+        pointerGate.reset();
+    }
+
+    function selectFromPointer(index, item, mouse) {
+        if (!pointerGate.moved(item, mouse)) {
+            return;
+        }
+        if (rows[index] && rows[index].selectable) {
+            selectedIndex = index;
+        }
+    }
+
+    PointerMoveGate {
+        id: pointerGate
+        referenceItem: card
+    }
+
     function select(delta) {
         if (rows.length === 0) {
             return;
@@ -89,6 +116,7 @@ Item {
         var landed = firstSelectable(next, delta > 0 ? 1 : -1);
         if (rows[landed] && rows[landed].selectable) {
             selectedIndex = landed;
+            disarmPointer();
             list.positionViewAtIndex(selectedIndex, ListView.Contain);
         }
     }
@@ -130,7 +158,12 @@ Item {
         return code >= 32 && code !== 127;
     }
 
-    onRowsChanged: if (rows.length && !rows[selectedIndex]) selectedIndex = firstSelectable(0, 1)
+    onRowsChanged: {
+        disarmPointer();
+        if (rows.length && !rows[selectedIndex]) {
+            selectedIndex = firstSelectable(0, 1);
+        }
+    }
 
     IpcHandler {
         target: "scoop.uptime-kuma"
@@ -215,6 +248,7 @@ Item {
                         if (root.filterText) {
                             root.filterText = "";
                             root.selectedIndex = root.firstSelectable(0, 1);
+                            root.disarmPointer();
                         } else {
                             root.close();
                         }
@@ -232,10 +266,12 @@ Item {
                         // Backspace and Ctrl+U only — Util does not handle typing.
                         root.filterText = Util.editedFilter(event, root.filterText);
                         root.selectedIndex = root.firstSelectable(0, 1);
+                        root.disarmPointer();
                         event.accepted = true;
                     } else if (root.isTypedCharacter(event)) {
                         root.filterText = root.filterText + event.text;
                         root.selectedIndex = root.firstSelectable(0, 1);
+                        root.disarmPointer();
                         event.accepted = true;
                     }
                 }
@@ -364,7 +400,9 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onEntered: if (rowItem.modelData.selectable) root.selectedIndex = rowItem.index
+                                onPositionChanged: function (mouse) {
+                                    root.selectFromPointer(rowItem.index, rowItem, mouse);
+                                }
                                 onClicked: {
                                     root.selectedIndex = rowItem.index;
                                     root.activate();
