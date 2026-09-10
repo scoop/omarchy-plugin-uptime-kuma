@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -29,14 +30,20 @@ BarWidget {
     implicitHeight: showing ? barSize : 0
     visible: showing
 
-    onWantsAttentionChanged: {
+    // Evaluated on change AND at startup: a property-change handler alone never
+    // fires when the value is already true the moment the widget is created,
+    // which is exactly what happens when the bar rebuilds its widgets while a
+    // monitor is already down. The Indicator then stayed hidden forever.
+    function evaluateAttention() {
         if (!wantsAttention) {
             graceTimer.stop();
             armed = false;
-        } else if (!armed) {
+        } else if (!armed && !graceTimer.running) {
             graceTimer.restart();
         }
     }
+
+    onWantsAttentionChanged: evaluateAttention()
 
     Timer {
         id: graceTimer
@@ -54,8 +61,32 @@ BarWidget {
     }
 
     onSettingsChanged: pushSettings()
-    onServiceChanged: pushSettings()
-    Component.onCompleted: pushSettings()
+    onServiceChanged: {
+        pushSettings();
+        evaluateAttention();
+    }
+    Component.onCompleted: {
+        pushSettings();
+        evaluateAttention();
+    }
+
+    IpcHandler {
+        target: "uptime-kuma-bar"
+
+        function probe(): string {
+            return (
+                "bar=" + (root.bar ? "yes" : "no") +
+                " shell=" + (root.bar && root.bar.shell ? "yes" : "no") +
+                " service=" + (root.service ? "yes" : "no") +
+                " down=" + root.downCount +
+                " conn=" + root.connection +
+                " wants=" + root.wantsAttention +
+                " armed=" + root.armed +
+                " showing=" + root.showing +
+                " settingsUrl=" + (root.setting("baseUrl", "") === "" ? "(empty)" : "set")
+            );
+        }
+    }
 
     Row {
         id: row
