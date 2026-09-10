@@ -26,7 +26,6 @@ Item {
     property string filterText: ""
     property int selectedIndex: 0
     property var opened_: ({})
-    property int expandedId: 0
 
     readonly property var view: service && service.view ? service.view : null
     readonly property string connection: service ? service.connection : "setup"
@@ -48,7 +47,6 @@ Item {
     function close() {
         opened = false;
         filterText = "";
-        expandedId = 0;
     }
 
     function toggle() {
@@ -115,11 +113,21 @@ Item {
         close();
     }
 
-    function expandSelected() {
-        var row = rows[selectedIndex];
-        if (row && row.type === "monitor") {
-            expandedId = expandedId === row.id ? 0 : row.id;
+    /**
+     * Whether this key press is the operator typing into the filter.
+     *
+     * Space counts: monitor names have spaces in them ("Home Assistant"), so a
+     * filter that cannot accept one cannot find them.
+     */
+    function isTypedCharacter(event) {
+        if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) {
+            return false;
         }
+        if (!event.text || event.text.length !== 1) {
+            return false;
+        }
+        var code = event.text.charCodeAt(0);
+        return code >= 32 && code !== 127;
     }
 
     onRowsChanged: if (rows.length && !rows[selectedIndex]) selectedIndex = firstSelectable(0, 1)
@@ -220,11 +228,13 @@ Item {
                     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                         root.activate();
                         event.accepted = true;
-                    } else if (event.key === Qt.Key_Space) {
-                        root.expandSelected();
-                        event.accepted = true;
                     } else if (Util.editsFilter(event, root.filterText)) {
+                        // Backspace and Ctrl+U only — Util does not handle typing.
                         root.filterText = Util.editedFilter(event, root.filterText);
+                        root.selectedIndex = root.firstSelectable(0, 1);
+                        event.accepted = true;
+                    } else if (root.isTypedCharacter(event)) {
+                        root.filterText = root.filterText + event.text;
                         root.selectedIndex = root.firstSelectable(0, 1);
                         event.accepted = true;
                     }
@@ -403,8 +413,11 @@ Item {
                                         color: Color.urgent
                                         font.family: root.fontFamily
                                         font.pixelSize: Style.font.caption
-                                        wrapMode: root.expandedId === rowItem.modelData.id ? Text.WordWrap : Text.NoWrap
-                                        maximumLineCount: root.expandedId === rowItem.modelData.id ? 6 : 1
+                                        // The selected row shows its whole
+                                        // error; the rest stay one line so the
+                                        // list keeps its rhythm.
+                                        wrapMode: rowItem.selected ? Text.WordWrap : Text.NoWrap
+                                        maximumLineCount: rowItem.selected ? 6 : 1
                                         elide: Text.ElideRight
                                         textFormat: Text.PlainText
                                     }
@@ -429,7 +442,7 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text: "type to filter · ↑↓ move · enter open · space expand · esc close"
+                        text: "type to filter · ↑↓ move · enter open · esc close"
                         color: root.dim
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption

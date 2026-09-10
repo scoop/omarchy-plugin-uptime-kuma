@@ -71,8 +71,9 @@ Clicking the indicator opens the same view.
 | type    | filter monitors                      |
 | `↑` `↓` | move                                 |
 | `Enter` | open in Uptime Kuma, or fold a group |
-| `Space` | expand a long error message          |
 | `Esc`   | clear the filter, then close         |
+
+Selecting a row shows its full error message; the others stay on one line.
 
 Groups are folded shut by default, so a healthy instance is a dozen rows rather
 than a wall of green. Anything down is pinned above the tree regardless, so
