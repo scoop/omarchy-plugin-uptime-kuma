@@ -1,0 +1,68 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - run: bun install --frozen-lockfile
+
+            - name: Tests
+              run: bun test
+
+            - name: Lint
+              run: bunx eslint .
+
+            - name: Format
+              run: bunx prettier --check .
+
+            # Replicates the checks `omarchy plugin add` runs before it will install
+            # anything. They are cheap, and failing them means the plugin cannot be
+            # installed at all — which is not something to discover after publishing.
+            - name: Plugin manifest
+              run: |
+                  set -euo pipefail
+
+                  jq -e '.schemaVersion == 1' manifest.json > /dev/null \
+                    || { echo "schemaVersion must be the number 1"; exit 1; }
+
+                  for field in id name version kinds entryPoints; do
+                    jq -e "has(\"$field\")" manifest.json > /dev/null \
+                      || { echo "manifest is missing required field: $field"; exit 1; }
+                  done
+
+                  id=$(jq -r .id manifest.json)
+                  [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+                    || { echo "id '$id' is not a valid plugin id"; exit 1; }
+                  [[ "$id" != omarchy.* ]] \
+                    || { echo "the omarchy.* id namespace is reserved"; exit 1; }
+
+                  # Every declared kind needs the entry point that matches it, and every
+                  # entry point must be a relative path that actually exists.
+                  while read -r kind; do
+                    case "$kind" in
+                      bar-widget) key=barWidget ;;
+                      *) key="$kind" ;;
+                    esac
+                    path=$(jq -r --arg k "$key" '.entryPoints[$k] // ""' manifest.json)
+                    [[ -n "$path" ]] || { echo "kind '$kind' has no '$key' entry point"; exit 1; }
+                    [[ "$path" != /* && "$path" != *..* ]] \
+                      || { echo "entry point '$path' must be a relative path"; exit 1; }
+                    [[ -f "$path" ]] || { echo "entry point '$path' does not exist"; exit 1; }
+                  done < <(jq -r '.kinds[]' manifest.json)
+
+                  # A single symlink anywhere makes the installer refuse the plugin.
+                  found=$(find . -path ./.git -prune -o -type l -print)
+                  [[ -z "$found" ]] || { echo "symlinks are not allowed in a plugin folder:"; echo "$found"; exit 1; }
+
+                  echo "manifest ok: $id"
