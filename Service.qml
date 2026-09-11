@@ -442,9 +442,17 @@ Item {
         }
     }
 
-    /** The same, for diagnostics, which are short and must stay short. */
+    /**
+     * The same, for diagnostics, which are short and must stay short.
+     *
+     * The trim happens to the chunk before it is joined, not to the joined
+     * result: building the whole string and then slicing it is the allocation
+     * this is supposed to prevent, just with a tidier line of code.
+     */
     function _ingestError(chunk) {
-        _stderrPending = (_stderrPending + chunk).slice(-_replyMaxChars);
+        var bounded = chunk.length > _replyMaxChars ? chunk.slice(-_replyMaxChars) : chunk;
+        var room = _replyMaxChars - bounded.length;
+        _stderrPending = (room > 0 ? _stderrPending.slice(-room) : "") + bounded;
         var parts = _stderrPending.split("\n");
         for (var i = 0; i < parts.length - 1; i++) {
             if (parts[i].trim() !== "") {

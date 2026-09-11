@@ -1,5 +1,11 @@
 import { test, expect } from "bun:test";
-import { normalizeUrl, normalizeTotp, urlError, firstProblem, isPlaintext } from "../src/setup.js";
+import {
+    normalizeUrl,
+    normalizeTotp,
+    urlError,
+    firstProblem,
+    isPlaintext,
+} from "../src/connection.js";
 
 test("a bare hostname is assumed to be https", () => {
     expect(normalizeUrl("kuma.example.com")).toBe("https://kuma.example.com");

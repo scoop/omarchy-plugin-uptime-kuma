@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
-import "src/setup.js" as Setup
+import "src/connection.js" as Setup
 
 // Connecting, without leaving the pane.
 //
