@@ -19,9 +19,14 @@ the property an API key would have given us if one had been usable here.
 ## Consequences
 
 The token lives in the login keyring via `secret-tool`, which gnome-keyring
-provides as an Omarchy dependency. It is passed to `curl` on stdin and never as
-an argument, so it cannot be read out of the process table — a practice taken
-from `daan.uptime-kuma`. A password change logs the plugin out, which surfaces
+provides as an Omarchy dependency. Neither it nor the password is ever a
+command-line argument or an environment variable of any process — not `curl`,
+not `jq`, not `secret-tool` — because `/proc/<pid>/cmdline` and
+`/proc/<pid>/environ` are readable by everything else running as this user. The
+request object is piped into `jq`, which writes the packet, which is piped into
+`curl`; the token is piped into `secret-tool`. The practice is taken from
+`daan.uptime-kuma`; `test/scripts.test.js` enforces it by running the helpers
+with a `jq` that records its own argv. A password change logs the plugin out, which surfaces
 as a prompt to authenticate again; this is correct behaviour, not a fault.
 
 Two-factor authentication is fully supported as a consequence of this design.

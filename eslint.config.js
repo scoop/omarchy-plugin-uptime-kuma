@@ -17,4 +17,20 @@ export default [
             "no-unused-vars": ["error", { caughtErrors: "none" }],
         },
     },
+    {
+        // The tests run under Bun rather than in QML, so they have a runtime
+        // the files in src/ deliberately do not: these are the globals that
+        // environment actually provides, declared rather than silenced.
+        files: ["test/**/*.js"],
+        languageOptions: {
+            globals: {
+                Bun: "readonly",
+                process: "readonly",
+                URL: "readonly",
+                Response: "readonly",
+                TextEncoder: "readonly",
+                setTimeout: "readonly",
+            },
+        },
+    },
 ];

@@ -21,6 +21,11 @@ Item {
     // widgets only, never into a service.
     property string baseUrl: ""
     property string username: ""
+    // Whether the person has said, about this address, that an unencrypted
+    // connection is acceptable. Only ever consulted for an http:// address that
+    // is not loopback; the helpers refuse one without it, so this is a decision
+    // being carried rather than a check being made here.
+    property bool allowPlaintext: false
 
     // "setup" — nothing configured yet, or the stored token was refused
     // "connecting" — a session is being established
@@ -176,6 +181,7 @@ Item {
             username: root.username,
             password: password,
             totp: totp || "",
+            allowPlaintext: root.allowPlaintext,
         });
         loginProc.running = true;
     }
@@ -246,7 +252,13 @@ Item {
         command: [root._pluginDir + "bin/poll.sh"]
         stdinEnabled: true
         onStarted: {
-            write(JSON.stringify({ url: root.baseUrl, token: root._token }) + "\n");
+            write(
+                JSON.stringify({
+                    url: root.baseUrl,
+                    token: root._token,
+                    allowPlaintext: root.allowPlaintext,
+                }) + "\n",
+            );
             stdinEnabled = false;
         }
         // One line per HTTP response body, still framed with 0x1e.

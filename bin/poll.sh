@@ -2,13 +2,17 @@
 #
 # Hold one Engine.IO polling session open and stream what it says.
 #
-# Reads {"url","token"} as JSON on stdin, then writes one line per HTTP
-# response body to stdout — each still framed with 0x1e, for src/engine.js to
-# decode. Diagnostics go to stderr; a lost connection exits non-zero so the
-# caller can back off and start a new session.
+# Reads {"url","token","allowPlaintext"} as JSON on stdin, then writes one line
+# per HTTP response body to stdout — each still framed with 0x1e, for
+# src/engine.js to decode. Diagnostics go to stderr; a lost connection exits
+# non-zero so the caller can back off and start a new session.
 #
 # Engine.IO payloads never contain a raw newline (JSON escapes them), which is
 # what makes one-body-per-line safe.
+#
+# The session token is worth what the password is worth, so it is handled the
+# same way: never an argument, never an environment variable, only ever a pipe
+# between jq and curl. See the note at the top of login.sh.
 
 set -uo pipefail
 
@@ -17,28 +21,63 @@ die() {
     exit 1
 }
 
+# Identical to LOOPBACK in login.sh and src/setup.js. All three must agree.
+LOOPBACK='^(localhost|127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|\[::1\]|\[::ffff:127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])$'
+
+host_of() {
+    local authority="${1#*://}"
+    authority="${authority%%/*}"
+    authority="${authority##*@}"
+    case "$authority" in
+        \[*\]*) printf '%s' "${authority%%\]*}]" ;;
+        *) printf '%s' "${authority%%:*}" ;;
+    esac
+}
+
 input="$(head -n 1)"
-url="$(jq -r '.url // ""' <<<"$input")"
-token="$(jq -r '.token // ""' <<<"$input")"
+url="$(printf '%s' "$input" | jq -r '.url // ""')"
+allow_plaintext="$(printf '%s' "$input" | jq -r 'if .allowPlaintext == true then "yes" else "no" end')"
 
 [[ -n "$url" ]] || die "No Uptime Kuma URL configured"
 [[ "$url" =~ ^https?://[^[:space:]/]+ ]] || die "URL must be http:// or https://"
-[[ -n "$token" ]] || die "No session token"
+
+# The token itself is checked without ever becoming a shell word: jq answers
+# the question rather than handing over the value.
+[[ "$(printf '%s' "$input" | jq -r 'if (.token // "") == "" then "no" else "yes" end')" == "yes" ]] ||
+    die "No session token"
 
 url="${url%/}"
+
+authority="${url#*://}"
+authority="${authority%%/*}"
+case "$authority" in
+    *@*) die "The address must not carry a username or password" ;;
+esac
+
+host="$(host_of "$url")"
+if [[ "$url" == https://* ]]; then
+    protos="=https"
+elif [[ "${host,,}" =~ $LOOPBACK ]]; then
+    protos="=https,http"
+elif [[ "$allow_plaintext" == "yes" ]]; then
+    protos="=https,http"
+else
+    die "That address is not encrypted, so a session token sent to it could be read in transit"
+fi
+
 jar="$(mktemp)"
 trap 'rm -f "$jar"' EXIT
 
 # --max-time must outlast a long poll: the server holds the request open for
 # pingInterval (25s by default) before answering with a ping.
-curl_common=(curl -q -sS --proto '=https,http' --proto-redir '=https,http' --max-time 60
+curl_common=(curl -q -sS --proto "$protos" --proto-redir "$protos" --max-time 60
     --max-filesize 4000000 -b "$jar" -c "$jar")
 
 endpoint="$url/socket.io/?EIO=4&transport=polling"
 
 handshake="$("${curl_common[@]}" "$endpoint")" || die "Cannot reach $url"
 [[ "${handshake:0:1}" == "0" ]] || die "Not an Uptime Kuma socket endpoint"
-sid="$(jq -r '.sid // ""' <<<"${handshake:1}")"
+sid="$(printf '%s' "${handshake:1}" | jq -r '.sid // ""')"
 [[ -n "$sid" ]] || die "Handshake returned no session id"
 
 session="$endpoint&sid=$sid"
@@ -51,8 +90,13 @@ post '40' || die "Could not open the socket namespace"
 
 # loginByToken performs no second-factor check, so every reconnect after the
 # first is unattended even on an account with two-factor enabled.
-packet="$(jq -cn --arg t "$token" '["loginByToken", $t]')"
-post "420$packet" || die "Could not present the session token"
+#
+# The packet is built by jq from stdin and piped straight to curl, so the token
+# is a command-line argument to nothing.
+printf '%s' "$input" |
+    jq -j '"420", (["loginByToken", .token] | tojson)' |
+    "${curl_common[@]}" -X POST --data-binary @- "$session" >/dev/null ||
+    die "Could not present the session token"
 
 # A refused token does not close the socket: the server simply never sends a
 # snapshot, so an unchecked session would poll forever looking connected but
@@ -67,11 +111,11 @@ for _ in 1 2 3 4 5 6; do
         ack_seen="yes"
         payload="${frame#43}"
         payload="${payload#"${payload%%[![:digit:]]*}"}"
-        if [[ "$(jq -r '.[0].ok // false' <<<"$payload" 2>/dev/null)" != "true" ]]; then
+        if [[ "$(printf '%s' "$payload" | jq -r '.[0].ok // false' 2>/dev/null)" != "true" ]]; then
             echo "Session token refused" >&2
             exit 2
         fi
-    done < <(tr '\036' '\n' <<<"$ack_body")
+    done < <(printf '%s\n' "$ack_body" | tr '\036' '\n')
     # The greeting arrives in the same batch as the acknowledgement; anything
     # already streamed must still reach the caller.
     [[ -n "$ack_body" ]] && printf '%s\n' "$ack_body"
@@ -89,5 +133,5 @@ while :; do
     # Answer any ping in this batch, or the server drops the session.
     while IFS= read -r frame; do
         [[ "$frame" == 2 ]] && post '3'
-    done < <(tr '\036' '\n' <<<"$body")
+    done < <(printf '%s\n' "$body" | tr '\036' '\n')
 done

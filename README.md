@@ -47,6 +47,17 @@ token goes into the login keyring; the URL and username are written to
 `~/.config/omarchy/shell.json`. Changing your Uptime Kuma password revokes the
 token, which asks you to sign in again — that is intended, not a fault.
 
+Neither the password, the two-factor code nor the token is ever passed to
+another program as a command-line argument or an environment variable, both of
+which any process running as you can read. They travel on pipes.
+
+An `https://` address, or an `http://` one pointing at this machine, connects
+without comment. An `http://` address pointing anywhere else would put your
+password and your session token on the wire where anything in between can read
+them, so the form asks you to confirm that address specifically before it will
+use it; the answer is remembered as `allowPlaintext` on the plugin's entry in
+`shell.json`, and changing the URL asks again.
+
 If the panel will not open — the shell is not running, or you are debugging a
 keyring problem — the same exchange is available from a terminal:
 
@@ -91,6 +102,33 @@ so they have nothing to report.
 
 When the connection to Uptime Kuma is lost, the view says so and greys out. It
 will not show you stale data that looks healthy.
+
+## Removing
+
+```bash
+omarchy plugin remove scoop.uptime-kuma
+```
+
+That deletes the plugin folder. Two things it deliberately does not reach, both
+of which you may want to clear yourself:
+
+- **The session token, in your login keyring.** It survives removal, and it
+  stays valid until your Uptime Kuma password changes. Clear it before you
+  remove the plugin with `omarchy-shell uptime-kuma logout`, or afterwards with:
+
+    ```bash
+    secret-tool clear service scoop.uptime-kuma account YOUR_USERNAME
+    ```
+
+- **`baseUrl`, `username` and `allowPlaintext`, on this plugin's entry in
+  `~/.config/omarchy/shell.json`.** Removing the widget from your bar removes
+  the entry and all three with it.
+
+Nothing else is left behind: no cache, no state directory, and no service,
+timer, hook or scheduled job — the plugin installs none. While a connection is
+open the helper holds a cookie jar in `/tmp`, created by `mktemp` and readable
+only by you; it is deleted when that connection ends. The keybinding is the one
+you added by hand, so it is yours to remove.
 
 ## Developing
 

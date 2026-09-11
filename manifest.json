@@ -20,7 +20,8 @@
         "defaultSection": "right",
         "defaults": {
             "baseUrl": "",
-            "username": ""
+            "username": "",
+            "allowPlaintext": false
         },
         "schema": [
             {

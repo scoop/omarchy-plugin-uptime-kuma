@@ -40,6 +40,7 @@ ColumnLayout {
     // must short-circuit on this or the operator's typing goes to the filter.
     readonly property bool editing:
         urlField.activeFocus ||
+        plaintextToggle.activeFocus ||
         userField.activeFocus ||
         passwordField.activeFocus ||
         totpField.activeFocus ||
@@ -66,6 +67,13 @@ ColumnLayout {
 
     // False once a write to shell.json was attempted and refused.
     property bool persisted: true
+
+    // Whether this address would put the password and the token on the wire in
+    // the clear, and whether the person has said to do it anyway. Consent is
+    // asked for per address, so changing the URL withdraws it: it was given
+    // about a particular machine, not about encryption in general.
+    readonly property bool plaintextAddress: Setup.isPlaintext(Setup.normalizeUrl(urlField.text))
+    property bool allowPlaintext: false
 
     // The values last written to shell.json, so an unchanged re-submit is not
     // mistaken for a failed write.
@@ -111,6 +119,8 @@ ColumnLayout {
     function focusField(field) {
         if (field === "baseUrl") {
             urlField.forceActiveFocus();
+        } else if (field === "allowPlaintext") {
+            plaintextToggle.forceActiveFocus();
         } else if (field === "username") {
             userField.forceActiveFocus();
         } else if (field === "totp") {
@@ -124,6 +134,7 @@ ColumnLayout {
     function reset() {
         passwordField.text = "";
         totpField.text = "";
+        allowPlaintext = false;
         totpRequired = false;
         submitting = false;
         problem = "";
@@ -147,6 +158,9 @@ ColumnLayout {
         if (userField.text === "" && !userField.activeFocus) {
             userField.text = service.username;
         }
+        if (service.allowPlaintext) {
+            allowPlaintext = true;
+        }
     }
 
     /**
@@ -157,18 +171,25 @@ ColumnLayout {
      * answers false both for "no such entry" and for "nothing changed"; only
      * the first of those is a failure, hence the comparison.
      */
-    function persistConnection(url, user) {
+    function persistConnection(url, user, plaintext) {
         if (!shell || moduleName === "" || typeof shell.updateEntryInline !== "function") {
             return false;
         }
-        var key = url + "\n" + user;
+        var key = url + "\n" + user + "\n" + plaintext;
         if (_persistedKey === key) {
             return true;
         }
         var entry = _existingEntry();
-        var unchanged = entry.baseUrl === url && entry.username === user;
+        var unchanged =
+            entry.baseUrl === url &&
+            entry.username === user &&
+            (entry.allowPlaintext === true) === plaintext;
         entry.baseUrl = url;
         entry.username = user;
+        // Written every time, so withdrawing consent is persisted as firmly as
+        // giving it: an entry that keeps a stale true would let the service go
+        // on using an address the person has since said no to.
+        entry.allowPlaintext = plaintext;
         var ok = shell.updateEntryInline(moduleName, entry) || unchanged;
         if (ok) {
             _persistedKey = key;
@@ -213,6 +234,7 @@ ColumnLayout {
             password: passwordField.text,
             totp: totpField.text,
             totpRequired: root.totpRequired,
+            allowPlaintext: root.allowPlaintext,
         };
         var trouble = Setup.firstProblem(fields);
         if (trouble) {
@@ -231,9 +253,12 @@ ColumnLayout {
 
         problem = "";
         problemField = "";
+        var plaintext = root.allowPlaintext && Setup.isPlaintext(url);
+        root.allowPlaintext = plaintext;
         service.baseUrl = url;
         service.username = user;
-        persisted = persistConnection(url, user);
+        service.allowPlaintext = plaintext;
+        persisted = persistConnection(url, user, plaintext);
 
         submitting = true;
         stallTimer.restart();
@@ -347,6 +372,26 @@ ColumnLayout {
                 root.escaped();
                 event.accepted = true;
             }
+        }
+    }
+
+    // Only ever on screen for an address that actually needs it: an https URL
+    // or a loopback one has nothing to consent to, and a permanent checkbox
+    // would teach people to tick it without reading.
+    Toggle {
+        id: plaintextToggle
+        Layout.fillWidth: true
+        visible: root.plaintextAddress
+        label: "Send my password to this address unencrypted"
+        description: "http:// carries your password and session token in the clear, where anything between this machine and that one can read them."
+        checked: root.allowPlaintext
+        foreground: root.foreground
+        accent: root.problemField === "allowPlaintext" ? Color.urgent : Color.accent
+        fontFamily: root.fontFamily
+        onClicked: root.allowPlaintext = !root.allowPlaintext
+        Keys.onEscapePressed: function (event) {
+            root.escaped();
+            event.accepted = true;
         }
     }
 

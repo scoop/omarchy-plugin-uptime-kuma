@@ -58,6 +58,7 @@ BarWidget {
         }
         service.baseUrl = setting("baseUrl", "");
         service.username = setting("username", "");
+        service.allowPlaintext = setting("allowPlaintext", false) === true;
     }
 
     onSettingsChanged: pushSettings()
