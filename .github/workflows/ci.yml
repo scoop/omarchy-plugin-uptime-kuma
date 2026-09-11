@@ -15,7 +15,17 @@ jobs:
               with:
                   bun-version: latest
 
-            - run: bun install --frozen-lockfile
+            # Dependabot can update package.json but not bun.lock, so a frozen
+            # install rejects every one of its pull requests for a reason that
+            # has nothing to do with the change being proposed. main stays
+            # frozen, which is where reproducibility actually matters.
+            - name: Install
+              run: |
+                  if [ "${{ github.event_name }}" = "pull_request" ]; then
+                    bun install
+                  else
+                    bun install --frozen-lockfile
+                  fi
 
             - name: Tests
               run: bun test
