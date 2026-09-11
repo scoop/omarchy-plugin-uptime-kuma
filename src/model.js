@@ -17,7 +17,7 @@ var SEVERITY = ["down", "degraded", "up"];
  * `forceInactive` is set when an ancestor group is paused, so a monitor can be
  * active itself and still not be checked.
  *
- * @param {object} monitor a monitor as it appears in `monitorList`
+ * @param {KumaMonitor} monitor a monitor as it appears in `monitorList`
  * @returns {boolean} true when the monitor is Paused
  */
 function isPaused(monitor) {
@@ -31,8 +31,8 @@ function isPaused(monitor) {
  * reported as Degraded: it is not confirmed working, and calling it Up would be
  * a guess in the direction that hides problems.
  *
- * @param {object} monitor a monitor as it appears in `monitorList`
- * @param {object|null} lastBeat its most recent heartbeat, if any
+ * @param {KumaMonitor} monitor a monitor as it appears in `monitorList`
+ * @param {KumaHeartbeat|null} lastBeat its most recent heartbeat, if any
  * @returns {string} "up", "degraded" or "down"
  */
 function statusOf(monitor, lastBeat) {
@@ -76,7 +76,7 @@ function worstStatus(statuses) {
  * would sort it ahead of every real letter. Position should be a property of
  * what a thing is called, not of how it was typed or when it was created.
  *
- * @param {Array} items anything carrying a `name`
+ * @param {Array<{name: string}>} items anything carrying a `name`
  * @returns {Array} the same items, ordered
  */
 function byName(items) {
@@ -175,8 +175,8 @@ function formatDuration(ms) {
  * maintenance has been Degraded throughout, and saying otherwise would restart
  * the clock on a problem that never went away.
  *
- * @param {object} monitor a monitor as it appears in `monitorList`
- * @param {Array} beats its heartbeat history, oldest first
+ * @param {KumaMonitor} monitor a monitor as it appears in `monitorList`
+ * @param {KumaHeartbeat[]} beats its heartbeat history, oldest first
  * @returns {string|null} the `time` of the earliest heartbeat in that run
  */
 function statusSince(monitor, beats) {
@@ -202,8 +202,8 @@ function statusSince(monitor, beats) {
  * Kuma sends a hundred and no more — and says so. Reporting the window as the
  * age would tell an operator a month-old service came up an hour ago.
  *
- * @param {object} monitor a monitor as it appears in `monitorList`
- * @param {Array} beats its heartbeat history, oldest first
+ * @param {KumaMonitor} monitor a monitor as it appears in `monitorList`
+ * @param {KumaHeartbeat[]} beats its heartbeat history, oldest first
  * @param {number} nowMs the current time
  * @returns {string} e.g. "for 3h 11m", "for at least 2d 5h", or "" if unknown
  */
@@ -273,8 +273,8 @@ function formatCertDays(days) {
  * height whatever it measured: the eye should land on the gap, not read it as
  * a fast check.
  *
- * @param {object} monitor a monitor as it appears in `monitorList`
- * @param {Array} beats its heartbeat history, oldest first
+ * @param {KumaMonitor} monitor a monitor as it appears in `monitorList`
+ * @param {KumaHeartbeat[]} beats its heartbeat history, oldest first
  * @returns {Array} `{status, level}` per heartbeat, oldest first, at most 100
  */
 function sparkline(monitor, beats) {
@@ -336,7 +336,7 @@ function _withStat(stats, monitorId, key, value) {
  * Uptime Kuma reports 24 hours, 30 days and a year; only the day is kept,
  * because only the day answers "is this normal for it right now".
  *
- * @param {object} stats the stats map
+ * @param {Record<string, MonitorStats>} stats the stats map
  * @param {number} monitorId which monitor
  * @param {number|string} period `24`, `720` or `"1y"`
  * @param {number} ratio 0.0–1.0
@@ -352,7 +352,7 @@ function applyUptime(stats, monitorId, period, ratio) {
 /**
  * Fold an `avgPing` event in.
  *
- * @param {object} stats the stats map
+ * @param {Record<string, MonitorStats>} stats the stats map
  * @param {number} monitorId which monitor
  * @param {number} ms the average over the last 24 hours
  * @returns {object} an amended map, or the one given when nothing was recorded
@@ -371,7 +371,7 @@ function applyAvgPing(stats, monitorId, ms) {
  * is how long the leaf has left, which is the only part of it that becomes an
  * outage on a date nobody wrote down.
  *
- * @param {object} stats the stats map
+ * @param {Record<string, MonitorStats>} stats the stats map
  * @param {number} monitorId which monitor
  * @param {string} tlsInfoJson the event's payload
  * @returns {object} an amended map, or the one given when nothing was recorded
@@ -395,11 +395,11 @@ function applyCertInfo(stats, monitorId, tlsInfoJson) {
  * Everything the detail view shows is derived here rather than there: the
  * Pane owns no arithmetic, and every line of this is testable without a shell.
  *
- * @param {object} monitor a monitor as it appears in `monitorList`
- * @param {Array} beats its heartbeat history, oldest first
- * @param {object} stat what `uptime`, `avgPing` and `certInfo` said about it
+ * @param {KumaMonitor} monitor a monitor as it appears in `monitorList`
+ * @param {KumaHeartbeat[]} beats its heartbeat history, oldest first
+ * @param {MonitorStats|null} stat what `uptime`, `avgPing` and `certInfo` said about it
  * @param {number} nowMs the current time
- * @returns {object} the row
+ * @returns {MonitorView} the row
  */
 function toRow(monitor, beats, stat, nowMs) {
     var history = beats || [];
@@ -439,9 +439,9 @@ function toRow(monitor, beats, stat, nowMs) {
  * count: Uptime Kuma is not checking them, so they have nothing to report and
  * would only dilute a view whose job is finding the broken ones.
  *
- * @param {object} monitorList monitors keyed by id, as Uptime Kuma sends them
- * @param {object} beatsById heartbeat history keyed by monitor id
- * @param {object} statsById uptime, latency and certificate figures by id
+ * @param {Record<string, KumaMonitor>} monitorList monitors keyed by id, as Uptime Kuma sends them
+ * @param {Record<string, KumaHeartbeat[]>} beatsById heartbeat history keyed by monitor id
+ * @param {Record<string, MonitorStats>} statsById uptime, latency and certificate figures by id
  * @param {number} nowMs the current time, against which ages are measured
  * @returns {object} `{groups, ungrouped, problems, counts}`
  */

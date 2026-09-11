@@ -23,6 +23,9 @@ jobs:
             - name: Lint
               run: bunx eslint .
 
+            - name: Types
+              run: bun run typecheck
+
             - name: Format
               run: bunx prettier --check .
 

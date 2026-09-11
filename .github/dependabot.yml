@@ -1,0 +1,15 @@
+version: 2
+updates:
+    # Development tooling only — this plugin ships no runtime dependencies. It
+    # runs on what Omarchy already provides: bash, curl, jq, secret-tool.
+    - package-ecosystem: npm
+      directory: /
+      schedule:
+          interval: weekly
+      open-pull-requests-limit: 5
+    # The actions in ci.yml are pinned by tag, so an update here is how a fix
+    # reaches them.
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly

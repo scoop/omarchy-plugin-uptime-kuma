@@ -83,12 +83,19 @@ function encodePong() {
 /**
  * Frame an outbound event.
  * @param {string} event event name
- * @param {Array} args arguments to send with it
+ * @param {unknown[]} args arguments to send with it
  * @param {number|null} ackId id to correlate a reply, or null to expect none
  * @returns {string} the packet
  */
 function encodeEvent(event, args, ackId) {
-    var body = JSON.stringify([event].concat(args || []));
+    // `[event, ...args]` without spread, which QML's JavaScript does not have.
+    /** @type {unknown[]} */
+    var payload = [event];
+    var rest = args || [];
+    for (var i = 0; i < rest.length; i++) {
+        payload.push(rest[i]);
+    }
+    var body = JSON.stringify(payload);
     var id = ackId === null || ackId === undefined ? "" : String(ackId);
     return "42" + id + body;
 }

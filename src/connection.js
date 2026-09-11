@@ -121,7 +121,7 @@ function urlError(raw) {
  * server has asked for one — an unattended six digits is worth checking before
  * it is spent, because a code is only good for one attempt and one window.
  *
- * @param {object} fields `{baseUrl, username, password, totp, totpRequired,
+ * @param {ConnectionFields} fields `{baseUrl, username, password, totp, totpRequired,
  *     allowPlaintext}`
  * @returns {object|null} `{field, message}`, or null when the form is ready to send
  */

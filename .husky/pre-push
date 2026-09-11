@@ -1,0 +1,7 @@
+# Mirror CI locally, so the branch that leaves this machine is the one CI will
+# accept. A push that fails here costs a minute; one that fails in CI costs a
+# round trip, and for a marketplace submission a stale SHA costs a review cycle.
+bun test
+bunx eslint .
+bunx prettier --check .
+bun run typecheck

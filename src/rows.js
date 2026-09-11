@@ -74,10 +74,10 @@ function sectionRow(id, label, status) {
  * deliberate: the top of the list answers "what is broken right now", and the
  * tree below still shows where it sits.
  *
- * @param {object|null} view output of `buildView`
+ * @param {View|null} view output of `buildView`
  * @param {string} filterText what the operator has typed, if anything
- * @param {object} opened group ids the operator has folded open
- * @returns {Array} rows, in display order
+ * @param {Record<string, boolean>} opened group ids the operator has folded open
+ * @returns {Row[]} rows, in display order
  */
 function flatten(view, filterText, opened) {
     if (!view) {
