@@ -2,7 +2,7 @@
     "schemaVersion": 1,
     "id": "scoop.uptime-kuma",
     "name": "Uptime Kuma",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "author": "scoop",
     "license": "MIT",
     "kinds": ["service", "bar-widget", "overlay"],
