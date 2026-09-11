@@ -89,7 +89,32 @@ fi
 umask 077
 jar="$(/usr/bin/mktemp -p "$XDG_RUNTIME_DIR" scoop-uptime-kuma-jar.XXXXXXXXXX)" ||
     die "Could not create a private file for the session cookie"
-trap '/usr/bin/rm -f -- "$jar"' EXIT
+body_file="$(/usr/bin/mktemp -p "$XDG_RUNTIME_DIR" scoop-uptime-kuma-body.XXXXXXXXXX)" ||
+    die "Could not create a private file for the response"
+job=""
+
+# Bash runs a trap only once the current foreground command has finished, and a
+# long poll is up to a minute of not listening. So every request runs as a
+# background job that this script waits on: waiting is interruptible, and the
+# handler can then kill the whole job group — the subshell and the curl inside
+# it — rather than leaving both reparented to init when the shell goes away.
+cleanup() {
+    if [[ -n $job ]]; then
+        kill -- -"$job" 2>/dev/null || kill -- "$job" 2>/dev/null
+    fi
+    /usr/bin/rm -f -- "$jar" "$body_file"
+}
+
+# A signal has to end the script, not merely tidy up after itself: a handler
+# that cleans and returns hands control back to the loop it interrupted, and
+# the session carries on as if nothing had been asked of it.
+on_signal() {
+    trap - EXIT INT TERM HUP
+    cleanup
+    exit 143
+}
+trap cleanup EXIT
+trap on_signal INT TERM HUP
 
 # --max-time must outlast a long poll: the server holds the request open for
 # pingInterval (25s by default) before answering with a ping. --fail so an error
@@ -105,8 +130,13 @@ curl_common=(/usr/bin/curl -q -sS --fail --noproxy '*' --proto "$protos"
 fetch() {
     local out
     local rc
-    out="$("${curl_common[@]}" "$@" | /usr/bin/head -c $((MAX_BODY + 1)))"
+    : >"$body_file"
+    { "${curl_common[@]}" "$@" | /usr/bin/head -c $((MAX_BODY + 1)) >"$body_file"; } &
+    job=$!
+    wait "$job"
     rc=$?
+    job=""
+    out="$(<"$body_file")"
     if ((${#out} > MAX_BODY)) || ((rc == 63)); then
         return 2
     fi
@@ -132,8 +162,16 @@ session="$endpoint&sid=$sid"
 # A POST's answer is bounded like every other response, even though the server
 # only ever says "ok" to one.
 post() {
-    printf '%s' "$1" | "${curl_common[@]}" -X POST --data-binary @- "$session" |
-        /usr/bin/head -c $((MAX_BODY + 1)) >/dev/null
+    local rc
+    {
+        printf '%s' "$1" | "${curl_common[@]}" -X POST --data-binary @- "$session" |
+            /usr/bin/head -c $((MAX_BODY + 1)) >/dev/null
+    } &
+    job=$!
+    wait "$job"
+    rc=$?
+    job=""
+    return "$rc"
 }
 
 post '40' || die "Could not open the socket namespace"
@@ -143,11 +181,15 @@ post '40' || die "Could not open the socket namespace"
 #
 # The packet is built by jq from stdin and piped straight to curl, so the token
 # is a command-line argument to nothing.
-printf '%s' "$input" |
-    /usr/bin/jq -j '"420", (["loginByToken", .token] | tojson)' |
-    "${curl_common[@]}" -X POST --data-binary @- "$session" |
-    /usr/bin/head -c $((MAX_BODY + 1)) >/dev/null ||
-    die "Could not present the session token"
+{
+    printf '%s' "$input" |
+        /usr/bin/jq -j '"420", (["loginByToken", .token] | tojson)' |
+        "${curl_common[@]}" -X POST --data-binary @- "$session" |
+        /usr/bin/head -c $((MAX_BODY + 1)) >/dev/null
+} &
+job=$!
+wait "$job" || die "Could not present the session token"
+job=""
 
 # A refused token does not close the socket: the server simply never sends a
 # snapshot, so an unchecked session would poll forever looking connected but

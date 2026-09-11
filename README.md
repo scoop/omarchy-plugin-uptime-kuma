@@ -42,6 +42,12 @@ omarchy plugin add https://github.com/scoop/omarchy-plugin-uptime-kuma --enable
 Open the panel and fill in the form: the URL of your Uptime Kuma, your username,
 your password, and a two-factor code if your account has one.
 
+`shell.json` must be a regular file. It is opened with `O_NOFOLLOW`, so a
+symlink there — which some dotfile setups create — is refused rather than
+followed. That is deliberate: the file names the address this plugin sends your
+credentials to, and a symlink is one more place something else could redirect
+it.
+
 Your password is exchanged once for a session token and is never stored. The
 token goes into the login keyring; the URL and username are written to
 `~/.config/omarchy/shell.json`. Changing your Uptime Kuma password revokes the
