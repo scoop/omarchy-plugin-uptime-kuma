@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 #
 # Read at most N bytes of a file, refusing anything that is not a plain file
 # opened directly.
@@ -9,6 +9,10 @@
 # open itself has to carry the guarantees: O_NOFOLLOW refuses a symlinked final
 # component, O_NONBLOCK refuses to hang on a FIFO, and the count stops the read
 # before an oversized file is in memory rather than after.
+#
+# The interpreter and dd are named by absolute path rather than found through
+# PATH: this helper is on the path that reads the credential configuration, and
+# PATH is inherited from whoever started the shell.
 #
 # Usage: read-bounded.sh <path> <max-bytes>
 # Writes the bytes to stdout. Exits non-zero, silently, on anything unexpected.

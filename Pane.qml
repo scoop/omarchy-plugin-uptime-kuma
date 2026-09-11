@@ -7,6 +7,7 @@ import QtQuick.Controls
 import qs.Commons
 import qs.Ui
 import "src/rows.js" as Rows
+import "src/sanitize.js" as Sanitize
 
 // The operator view: summoned deliberately, read quickly, dismissed.
 //
@@ -141,8 +142,20 @@ Item {
             return;
         }
         // A monitor row opens where the operator can actually do something.
-        var base = service ? String(service.baseUrl).replace(/\/+$/, "") : "";
-        Quickshell.execDetached(["xdg-open", base + "/dashboard/" + row.id]);
+        //
+        // `service.baseUrl` comes from shell.json, which every process running
+        // as this user can rewrite, so the URL is parsed here rather than
+        // trusted because a setup form once looked at it. A base that does not
+        // validate opens nothing at all: there is no repaired version of a
+        // setting somebody else may have written, and launching a guess is
+        // exactly the failure this check exists to prevent.
+        var target = Sanitize.dashboardUrl(service ? service.baseUrl : "", row.id);
+        if (target === null) {
+            return;
+        }
+        // Absolute path, so a planted `xdg-open` earlier on PATH is not the
+        // program that runs; `--` so a URL can never be read as an option.
+        Quickshell.execDetached(["/usr/bin/xdg-open", "--", target]);
         close();
     }
 
@@ -194,20 +207,13 @@ Item {
             root.toggle();
         }
 
-        function inspect(): string {
-            var r = root.rows[root.selectedIndex];
-            return (
-                "rows=" + root.rows.length +
-                " idx=" + root.selectedIndex +
-                " type=" + (r ? r.type : "none") +
-                " label=" + (r ? r.label : "-") +
-                " hasMonitorField=" + (r && "monitor" in r ? "yes" : "no") +
-                " monitorNull=" + (r && r.monitor === null ? "yes" : "no") +
-                " samples=" + (r && r.monitor && r.monitor.samples ? r.monitor.samples.length : -1) +
-                " filterLen=" + root.filterText.length +
-                " setupVisible=" + setupForm.visible
-            );
-        }
+        // Nothing else belongs here. Anything reachable through
+        // `omarchy-shell` runs without the operator being present to consent
+        // to it, so the surface stays at "put the panel on screen or take it
+        // off" — parameterless, non-destructive, and returning nothing. An
+        // `inspect` method that reported the selected row's label and internal
+        // state lived here; it handed remote-supplied monitor names to any
+        // process that asked, and it is gone rather than narrowed.
     }
 
     PanelWindow {
@@ -338,7 +344,17 @@ Item {
                             }
                             return parts.join(" · ");
                         }
-                        detail: root.filterText === "" ? "" : "Filtering: " + root.filterText
+                        // PanelHero renders title, meta and detail itself, and
+                        // the plugin cannot pin `textFormat` on components it
+                        // does not own — so anything variable reaching one is
+                        // stripped of markup and control characters first.
+                        // Here that is the operator's own typed filter, which
+                        // is not a threat but is also not a constant, and the
+                        // invariant is only auditable if it holds everywhere.
+                        detail:
+                            root.filterText === ""
+                                ? ""
+                                : "Filtering: " + Sanitize.plain(root.filterText, 64)
                         foreground: root.foreground
                         fontFamily: root.fontFamily
                         iconComponent: Component {
@@ -436,7 +452,13 @@ Item {
                                 anchors.left: parent.left
                                 anchors.bottom: parent.bottom
                                 anchors.bottomMargin: Style.space(4)
-                                text: rowItem.modelData.label.toUpperCase()
+                                // Another host-owned sink: PanelSectionHeader
+                                // renders this and the plugin cannot pin its
+                                // format. plain() runs before toUpperCase() so
+                                // a missing label is "" rather than a thrown
+                                // property access, and the 64-character cap
+                                // leaves no room for case folding to overrun.
+                                text: Sanitize.plain(rowItem.modelData.label, 64).toUpperCase()
                                 foreground: root.foreground
                                 fontFamily: root.fontFamily
                             }

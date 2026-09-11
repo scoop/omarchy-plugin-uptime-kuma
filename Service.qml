@@ -56,7 +56,7 @@ Item {
     readonly property int _themeMaxBytes: 65536
     readonly property int _tokenMaxChars: 8192
     readonly property int _replyMaxChars: 65536
-    readonly property int _payloadMaxChars: 4000000
+    readonly property int _payloadMaxChars: 8000000
     readonly property int _demoMaxBytes: 524288
 
     // While the canned snapshot is on screen, the reconnect machinery has to
@@ -88,21 +88,18 @@ Item {
         onFileChanged: themeProc.running = true
     }
 
-    Process {
+    BoundedProcess {
         id: themeProc
+        maxBytes: root._themeMaxBytes
         command: [root._pluginDir + "bin/read-bounded.sh", themeWatcher.path, String(root._themeMaxBytes)]
-        stdout: StdioCollector {
-            waitForEnd: true
-            onStreamFinished: {
-                // The helper returns max + 1 bytes when the file is larger than
-                // it should be; that is a refusal, not something to parse.
-                if (text.length === 0 || text.length > root._themeMaxBytes) {
-                    root.okColor = Color.muted;
-                    return;
-                }
-                var match = /^[ \t]*green[ \t]*=[ \t]*["']?(#[0-9A-Fa-f]{6})/m.exec(text);
-                root.okColor = match ? match[1] : Color.muted;
+        onFinishedWith: function (text, tooLarge) {
+            // An oversized theme file is a refusal, not something to parse.
+            if (tooLarge || text.length === 0) {
+                root.okColor = Color.muted;
+                return;
             }
+            var match = /^[ \t]*green[ \t]*=[ \t]*["']?(#[0-9A-Fa-f]{6})/m.exec(text);
+            root.okColor = match ? match[1] : Color.muted;
         }
     }
 
@@ -128,8 +125,29 @@ Item {
     }
 
     function stop() {
+        // running = false sends TERM to the helper. Its curl child is not
+        // reached by that, so the escalation below is what actually ends the
+        // session if the helper does not go quietly.
+        if (pollProc.running) {
+            pollProc.signal(15);
+            pollKillTimer.restart();
+        }
         pollProc.running = false;
         retryTimer.stop();
+        _pending = "";
+        _stderrPending = "";
+    }
+
+    Timer {
+        id: pollKillTimer
+        interval: 2000
+        repeat: false
+        onTriggered: if (pollProc.running) pollProc.signal(9)
+    }
+
+    // A shell that is going away should not leave a poll behind it.
+    Component.onDestruction: {
+        pollProc.running = false;
     }
 
     /** Drop the session and ask for credentials again. */
@@ -149,26 +167,32 @@ Item {
         tokenProc.running = true;
     }
 
-    Process {
+    BoundedProcess {
         id: tokenProc
-        command: ["secret-tool", "lookup", "service", "scoop.uptime-kuma", "account", root.username]
-        stdout: StdioCollector {
-            waitForEnd: true
-            onStreamFinished: {
-                var value = text.length > root._tokenMaxChars ? "" : text.trim();
-                if (value === "") {
-                    root.connection = "setup";
-                    return;
-                }
-                root._token = value;
-                root.start();
+        maxBytes: root._tokenMaxChars
+        command: [
+            "/usr/bin/secret-tool",
+            "lookup",
+            "service",
+            "scoop.uptime-kuma",
+            "account",
+            root.username,
+        ]
+        onFinishedWith: function (text, tooLarge) {
+            var value = tooLarge ? "" : text.trim();
+            if (value === "") {
+                root.connection = "setup";
+                return;
             }
+            root._token = value;
+            root.start();
         }
     }
 
-    Process {
+    BoundedProcess {
         id: forgetProc
-        command: ["secret-tool", "clear", "service", "scoop.uptime-kuma", "account", root.username]
+        maxBytes: 4096
+        command: ["/usr/bin/secret-tool", "clear", "service", "scoop.uptime-kuma", "account", root.username]
     }
 
     /**
@@ -186,8 +210,9 @@ Item {
         loginProc.running = true;
     }
 
-    Process {
+    BoundedProcess {
         id: loginProc
+        maxBytes: root._replyMaxChars
         property string payload: ""
         command: [root._pluginDir + "bin/login.sh"]
         stdinEnabled: true
@@ -196,40 +221,38 @@ Item {
             payload = "";
             stdinEnabled = false;
         }
-        stdout: StdioCollector {
-            waitForEnd: true
-            onStreamFinished: {
-                var result = {};
-                try {
-                    if (text.length > root._replyMaxChars) {
-                        throw new Error("oversized reply");
-                    }
-                    result = JSON.parse(text);
-                } catch (e) {
-                    result = { ok: false, error: "Unreadable answer from the login helper" };
+        onFinishedWith: function (text, tooLarge) {
+            var result = {};
+            try {
+                if (tooLarge) {
+                    throw new Error("oversized reply");
                 }
-                if (result.ok && result.token) {
-                    root._token = result.token;
-                    storeProc.token = result.token;
-                    storeProc.running = true;
-                    root.start();
-                    return;
-                }
-                if (result.totpRequired) {
-                    root.loginNeedsTotp();
-                    return;
-                }
-                root.lastError = result.error || "Login failed";
-                root.loginFailed(root.lastError);
+                result = JSON.parse(text);
+            } catch (e) {
+                result = { ok: false, error: "Unreadable answer from the login helper" };
             }
+            if (result.ok && result.token) {
+                root._token = result.token;
+                storeProc.token = result.token;
+                storeProc.running = true;
+                root.start();
+                return;
+            }
+            if (result.totpRequired) {
+                root.loginNeedsTotp();
+                return;
+            }
+            root.lastError = result.error || "Login failed";
+            root.loginFailed(root.lastError);
         }
     }
 
-    Process {
+    BoundedProcess {
         id: storeProc
+        maxBytes: 4096
         property string token: ""
         command: [
-            "secret-tool",
+            "/usr/bin/secret-tool",
             "store",
             "--label=Uptime Kuma session (scoop.uptime-kuma)",
             "service",
@@ -250,6 +273,14 @@ Item {
     Process {
         id: pollProc
         command: [root._pluginDir + "bin/poll.sh"]
+        clearEnvironment: true
+        environment: ({
+                PATH: "/usr/bin:/bin",
+                DBUS_SESSION_BUS_ADDRESS: Quickshell.env("DBUS_SESSION_BUS_ADDRESS"),
+                XDG_RUNTIME_DIR: Quickshell.env("XDG_RUNTIME_DIR"),
+                HOME: Quickshell.env("HOME"),
+                LC_ALL: "C",
+            })
         stdinEnabled: true
         onStarted: {
             write(
@@ -261,19 +292,26 @@ Item {
             );
             stdinEnabled = false;
         }
-        // One line per HTTP response body, still framed with 0x1e.
+        // Raw chunks, with the lines assembled here.
+        //
+        // A line-delimited parser cannot be a ceiling: it has to buffer until
+        // the delimiter arrives before it can hand anything over, so a peer
+        // that never sends a newline is an unbounded allocation inside the
+        // shell. curl's --max-filesize does not cover this either — it acts on
+        // a declared Content-Length, and these responses are chunked. So the
+        // budget is counted here, against the bytes as they arrive, and a
+        // payload that outgrows it ends the session rather than being trimmed
+        // into something that would parse.
         stdout: SplitParser {
-            splitMarker: "\n"
-            onRead: function (line) {
-                root._consume(line);
+            splitMarker: ""
+            onRead: function (chunk) {
+                root._ingest(chunk);
             }
         }
         stderr: SplitParser {
-            splitMarker: "\n"
-            onRead: function (line) {
-                if (line.trim() !== "") {
-                    root.lastError = line.trim();
-                }
+            splitMarker: ""
+            onRead: function (chunk) {
+                root._ingestError(chunk);
             }
         }
         onExited: function (exitCode) {
@@ -335,34 +373,32 @@ Item {
     // work on the panel without an Uptime Kuma to point it at. It replaces the
     // in-memory state only: nothing is written, and a restart returns to the
     // real instance.
-    Process {
+    BoundedProcess {
         id: demoProc
+        maxBytes: root._demoMaxBytes
         command: [
             root._pluginDir + "bin/read-bounded.sh",
             root._pluginDir + "demo/snapshot.json",
             String(root._demoMaxBytes),
         ]
-        stdout: StdioCollector {
-            waitForEnd: true
-            onStreamFinished: {
-                if (text.length === 0 || text.length > root._demoMaxBytes) {
-                    root.lastError = "Could not read the demo snapshot";
-                    return;
-                }
-                var snapshot;
-                try {
-                    snapshot = JSON.parse(text);
-                } catch (e) {
-                    root.lastError = "The demo snapshot is not readable JSON";
-                    return;
-                }
-                root._monitors = snapshot.monitorList || {};
-                root._beats = root._rebase(snapshot.beats || {});
-                root._stats = snapshot.stats || {};
-                root.connection = "connected";
-                root.lastUpdate = Date.now();
-                root.view = Model.buildView(root._monitors, root._beats, root._stats, Date.now());
+        onFinishedWith: function (text, tooLarge) {
+            if (tooLarge || text.length === 0) {
+                root.lastError = "Could not read the demo snapshot";
+                return;
             }
+            var snapshot;
+            try {
+                snapshot = JSON.parse(text);
+            } catch (e) {
+                root.lastError = "The demo snapshot is not readable JSON";
+                return;
+            }
+            root._monitors = snapshot.monitorList || {};
+            root._beats = root._rebase(snapshot.beats || {});
+            root._stats = snapshot.stats || {};
+            root.connection = "connected";
+            root.lastUpdate = Date.now();
+            root.view = Model.buildView(root._monitors, root._beats, root._stats, Date.now());
         }
     }
 
@@ -374,14 +410,51 @@ Item {
 
     // ---------------------------------------------------------------- decoding
 
-    function _consume(line) {
-        // curl caps each response, but the ceiling belongs on this side of the
-        // pipe as well: the cap is on what we agree to hold, not on what the
-        // other end agrees to send.
-        if (line.length > _payloadMaxChars) {
+    property string _pending: ""
+    property string _stderrPending: ""
+
+    /**
+     * Assemble lines out of raw chunks, refusing to hold more than the budget.
+     *
+     * poll.sh writes one payload per line, but nothing about a pipe guarantees
+     * a line ever ends. The budget is checked against the buffer before the
+     * newline is found, which is the whole point: by the time a delimiter-based
+     * parser could complain, the allocation it would complain about exists.
+     */
+    function _ingest(chunk) {
+        if (_pending.length + chunk.length > _payloadMaxChars) {
             root.lastError = "Ignored an oversized response from Uptime Kuma";
+            _pending = "";
+            stop();
+            retryTimer.interval = root._backoffMs;
+            retryTimer.start();
             return;
         }
+        _pending += chunk;
+        var cut = _pending.indexOf("\n");
+        while (cut !== -1) {
+            var line = _pending.slice(0, cut);
+            _pending = _pending.slice(cut + 1);
+            if (line !== "") {
+                _consume(line);
+            }
+            cut = _pending.indexOf("\n");
+        }
+    }
+
+    /** The same, for diagnostics, which are short and must stay short. */
+    function _ingestError(chunk) {
+        _stderrPending = (_stderrPending + chunk).slice(-_replyMaxChars);
+        var parts = _stderrPending.split("\n");
+        for (var i = 0; i < parts.length - 1; i++) {
+            if (parts[i].trim() !== "") {
+                root.lastError = parts[i].trim();
+            }
+        }
+        _stderrPending = parts[parts.length - 1];
+    }
+
+    function _consume(line) {
         var packets = Engine.decodePayload(line);
         var changed = false;
 
@@ -478,38 +551,22 @@ Item {
 
     // -------------------------------------------------------------------- ipc
 
+    // Reachable by anyone who can run omarchy-shell, with no user present, so
+    // what is here has to be safe to be called by surprise: nothing that
+    // deletes, persists, or hands back the instance's contents. Signing out
+    // used to live here and does not any more — it destroyed the keyring entry
+    // on request. The README documents `secret-tool clear` instead.
     IpcHandler {
-        target: "uptime-kuma"
+        target: "scoop.uptime-kuma.service"
 
         function refresh(): void {
             root.stop();
             root.start();
         }
 
-        function diagnose(): string {
-            return (
-                "configured=" + root.configured +
-                " baseUrl=" + (root.baseUrl === "" ? "(empty)" : "set") +
-                " username=" + (root.username === "" ? "(empty)" : root.username) +
-                " tokenChars=" + root._token.length +
-                " lastError=" + (root.lastError === "" ? "(none)" : root.lastError)
-            );
-        }
-
+        /** The connection state, and deliberately nothing else. */
         function status(): string {
-            return (
-                root.connection +
-                " up=" +
-                root.view.counts.up +
-                " down=" +
-                root.view.counts.down +
-                " paused=" +
-                root.view.counts.paused
-            );
-        }
-
-        function logout(): void {
-            root.forget();
+            return root.connection;
         }
 
         function demo(): void {

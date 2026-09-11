@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 #
 # Authenticate once, interactively.
 #
@@ -9,24 +9,55 @@
 # or the token that comes back, ever a command-line argument: /proc/<pid>/cmdline
 # is readable by every process running as this user. The request object is built
 # by jq from values fed to it on stdin, and the token reaches secret-tool the
-# same way. See the note at the top of login.sh, and test/scripts.test.js.
+# same way. Every binary is named by absolute path, and the interpreter is
+# /usr/bin/bash rather than /usr/bin/env bash, so that PATH does not get to
+# choose which jq, curl or secret-tool handles the credential. See the note at
+# the top of login.sh, and test/scripts.test.js.
 
 set -uo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-config="$HOME/.config/omarchy/shell.json"
+# ${#s} counts characters unless the locale says otherwise, and the config cap
+# below is in bytes. See login.sh.
+export LC_ALL=C
+
+# shell.json is a few kilobytes in practice; this is the point past which it is
+# refused rather than read.
+MAX_CONFIG=262144
 
 die() {
     echo "$1" >&2
     exit 1
 }
 
-[[ -f "$config" ]] || die "No shell.json at $config"
+# `dirname` is an external program and would be resolved through PATH like any
+# other; the shell can take the directory apart on its own. `./` makes the
+# expansion well defined when this was invoked as a bare name.
+src="${BASH_SOURCE[0]}"
+[[ "$src" == */* ]] || src="./$src"
+here="$(cd -- "${src%/*}" && pwd -P)" || die "Cannot find the directory this script is in"
 
-entry="$(jq -c '[.bar.layout[]?[]? | select(.id == "scoop.uptime-kuma")] | first // {}' "$config")"
-url="$(printf '%s' "$entry" | jq -r '.baseUrl // ""')"
-username="$(printf '%s' "$entry" | jq -r '.username // ""')"
-allow_plaintext="$(printf '%s' "$entry" | jq -r 'if .allowPlaintext == true then "yes" else "no" end')"
+config="$HOME/.config/omarchy/shell.json"
+
+# Read through the bounded helper rather than handing the pathname to jq. `jq
+# file` follows a symlink, blocks forever on a FIFO, and reads the whole file
+# before any size check could run; testing the name with -f first and opening it
+# afterwards is two resolutions of a name another process running as this user
+# can change in between. read-bounded.sh does one O_NOFOLLOW|O_NONBLOCK open and
+# reads MAX + 1 bytes through that same descriptor, so an oversized file is
+# detected here rather than truncated into something that still parses.
+config_json="$("$here/read-bounded.sh" "$config" "$MAX_CONFIG")" ||
+    die "Cannot read shell.json at $config — it must be a plain file that exists, not a symlink or a pipe."
+((${#config_json} <= MAX_CONFIG)) ||
+    die "shell.json at $config is larger than $MAX_CONFIG bytes; refusing to parse it."
+[[ -n "$config_json" ]] || die "shell.json at $config is empty"
+
+entry="$(printf '%s' "$config_json" |
+    /usr/bin/jq -c '[.bar.layout[]?[]? | select(.id == "scoop.uptime-kuma")] | first // {}')" ||
+    die "Could not parse shell.json at $config"
+url="$(printf '%s' "$entry" | /usr/bin/jq -r '.baseUrl // ""')"
+username="$(printf '%s' "$entry" | /usr/bin/jq -r '.username // ""')"
+allow_plaintext="$(printf '%s' "$entry" |
+    /usr/bin/jq -r 'if .allowPlaintext == true then "yes" else "no" end')"
 
 [[ -n "$url" && -n "$username" ]] || die "Set baseUrl and username on the scoop.uptime-kuma entry in $config first."
 
@@ -57,22 +88,22 @@ read -rp "Two-factor code (blank if you have none): " totp
 # process rather than handed to a new one as arguments. `read -r` stops at a
 # newline, so no field here can contain one and line-delimited input is exact.
 result="$(printf '%s\n%s\n%s\n%s\n%s\n' "$url" "$username" "$password" "$totp" "$allow_plaintext" |
-    jq -Rn '[inputs] | {
+    /usr/bin/jq -Rn '[inputs] | {
         url: .[0], username: .[1], password: .[2], totp: .[3],
         allowPlaintext: (.[4] == "yes")
     }' | "$here/login.sh")"
 password=""
 
-if [[ "$(printf '%s' "$result" | jq -r '.totpRequired // false')" == "true" ]]; then
+if [[ "$(printf '%s' "$result" | /usr/bin/jq -r '.totpRequired // false')" == "true" ]]; then
     die "That account has two-factor enabled — run this again and enter a code."
 fi
 
-if [[ "$(printf '%s' "$result" | jq -r '.ok // false')" != "true" ]]; then
-    die "$(printf '%s' "$result" | jq -r '.error // "Login failed"')"
+if [[ "$(printf '%s' "$result" | /usr/bin/jq -r '.ok // false')" != "true" ]]; then
+    die "$(printf '%s' "$result" | /usr/bin/jq -r '.error // "Login failed"')"
 fi
 
-printf '%s' "$result" | jq -r '.token' |
-    secret-tool store --label="Uptime Kuma session (scoop.uptime-kuma)" \
+printf '%s' "$result" | /usr/bin/jq -r '.token' |
+    /usr/bin/secret-tool store --label="Uptime Kuma session (scoop.uptime-kuma)" \
         service scoop.uptime-kuma account "$username" ||
     die "Could not write to the login keyring"
 

@@ -113,8 +113,7 @@ That deletes the plugin folder. Two things it deliberately does not reach, both
 of which you may want to clear yourself:
 
 - **The session token, in your login keyring.** It survives removal, and it
-  stays valid until your Uptime Kuma password changes. Clear it before you
-  remove the plugin with `omarchy-shell uptime-kuma logout`, or afterwards with:
+  stays valid until your Uptime Kuma password changes. Clear it with:
 
     ```bash
     secret-tool clear service scoop.uptime-kuma account YOUR_USERNAME
@@ -145,7 +144,7 @@ There is a canned snapshot for working on the panel without an Uptime Kuma to
 point it at, and for regenerating the screenshot above:
 
 ```bash
-omarchy-shell uptime-kuma demo
+omarchy-shell scoop.uptime-kuma.service demo
 ```
 
 It replaces the in-memory state only — nothing is written, and restarting the

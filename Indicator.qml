@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -71,23 +70,14 @@ BarWidget {
         evaluateAttention();
     }
 
-    IpcHandler {
-        target: "uptime-kuma-bar"
-
-        function probe(): string {
-            return (
-                "bar=" + (root.bar ? "yes" : "no") +
-                " shell=" + (root.bar && root.bar.shell ? "yes" : "no") +
-                " service=" + (root.service ? "yes" : "no") +
-                " down=" + root.downCount +
-                " conn=" + root.connection +
-                " wants=" + root.wantsAttention +
-                " armed=" + root.armed +
-                " showing=" + root.showing +
-                " settingsUrl=" + (root.setting("baseUrl", "") === "" ? "(empty)" : "set")
-            );
-        }
-    }
+    // The bar widget exposes no IPC at all.
+    //
+    // A `probe` method used to answer here with the down count, the connection
+    // state and whether a base URL was configured. It changed nothing, which is
+    // why it felt harmless, but it read out state derived from a remote server
+    // to any process that could reach `omarchy-shell` — with nobody present to
+    // agree to that. The widget's only job is to be looked at, so there is
+    // nothing here to keep.
 
     Row {
         id: row
