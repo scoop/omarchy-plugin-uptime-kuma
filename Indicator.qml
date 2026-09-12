@@ -25,7 +25,11 @@ BarWidget {
     readonly property bool wantsAttention: downCount > 0 || connection === "unreachable"
     readonly property bool showing: armed && wantsAttention
 
-    implicitWidth: showing ? row.implicitWidth : 0
+    // The bar's widget row has zero spacing, so every widget pads itself —
+    // WidgetButton keeps a horizontal margin, the icon widgets sit in a fixed
+    // slot wider than their glyph. Without that the indicator butts straight
+    // against whatever plugin is next to it.
+    implicitWidth: showing ? row.implicitWidth + Style.space(14) : 0
     implicitHeight: showing ? barSize : 0
     visible: showing
 
