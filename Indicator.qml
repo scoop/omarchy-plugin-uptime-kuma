@@ -25,12 +25,20 @@ BarWidget {
     readonly property bool wantsAttention: downCount > 0 || connection === "unreachable"
     readonly property bool showing: armed && wantsAttention
 
-    // The bar's widget row has zero spacing, so every widget pads itself —
+    // The bar's widget list has zero spacing, so every widget pads itself —
     // WidgetButton keeps a horizontal margin, the icon widgets sit in a fixed
     // slot wider than their glyph. Without that the indicator butts straight
     // against whatever plugin is next to it.
-    implicitWidth: showing ? row.implicitWidth + Style.space(14) : 0
-    implicitHeight: showing ? barSize : 0
+    //
+    // Which edge that padding belongs on depends on the bar: a horizontal bar
+    // lays its widgets out in a Row, a vertical one in a Column, so the gap
+    // that separates us from a neighbour runs along the other axis and the
+    // remaining one is simply the bar's own thickness. 14 puts a lone glyph in
+    // a slot the size of the icon widgets beside it.
+    readonly property int slotPadding: Style.space(14)
+
+    implicitWidth: showing ? (vertical ? barSize : content.implicitWidth + slotPadding) : 0
+    implicitHeight: showing ? (vertical ? content.implicitHeight + slotPadding : barSize) : 0
     visible: showing
 
     // Evaluated on change AND at startup: a property-change handler alone never
@@ -83,13 +91,20 @@ BarWidget {
     // agree to that. The widget's only job is to be looked at, so there is
     // nothing here to keep.
 
-    Row {
-        id: row
+    // A Grid rather than a Row: on a vertical bar the glyph and its count have
+    // to stack, because side by side they would run out past the bar's edge as
+    // soon as more than one monitor is down. Positioners manage their children's
+    // position on the axes they lay out along, so the centering that a Row let
+    // the children anchor for themselves is the Grid's own alignment here.
+    Grid {
+        id: content
         anchors.centerIn: parent
+        columns: root.vertical ? 1 : 2
         spacing: Style.spacing.xs
+        horizontalItemAlignment: Grid.AlignHCenter
+        verticalItemAlignment: Grid.AlignVCenter
 
         Text {
-            anchors.verticalCenter: parent.verticalCenter
             // Unreachable is not the same alarm as a monitor being down, and
             // must never be mistaken for it: we are not saying something broke,
             // we are saying we no longer know.
@@ -101,7 +116,6 @@ BarWidget {
         }
 
         Text {
-            anchors.verticalCenter: parent.verticalCenter
             visible: root.downCount > 0
             text: String(root.downCount)
             font.family: bar ? bar.fontFamily : Style.font.family
