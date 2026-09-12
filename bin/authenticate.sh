@@ -45,7 +45,10 @@ config="$HOME/.config/omarchy/shell.json"
 # can change in between. read-bounded.sh does one O_NOFOLLOW|O_NONBLOCK open and
 # reads MAX + 1 bytes through that same descriptor, so an oversized file is
 # detected here rather than truncated into something that still parses.
-config_json="$("$here/read-bounded.sh" "$config" "$MAX_CONFIG")" ||
+# Through supervise.sh like every other helper: the deadline is what stops a
+# read of a file on a mount that has gone away, and the process group is what
+# makes sure nothing is left running when it does.
+config_json="$("$here/supervise.sh" 10 "$here/read-bounded.sh" "$config" "$MAX_CONFIG")" ||
     die "Cannot read shell.json at $config — it must be a plain file that exists, not a symlink or a pipe."
 ((${#config_json} <= MAX_CONFIG)) ||
     die "shell.json at $config is larger than $MAX_CONFIG bytes; refusing to parse it."
@@ -91,7 +94,7 @@ result="$(printf '%s\n%s\n%s\n%s\n%s\n' "$url" "$username" "$password" "$totp" "
     /usr/bin/jq -Rn '[inputs] | {
         url: .[0], username: .[1], password: .[2], totp: .[3],
         allowPlaintext: (.[4] == "yes")
-    }' | "$here/login.sh")"
+    }' | "$here/supervise.sh" 120 "$here/login.sh")"
 password=""
 
 if [[ "$(printf '%s' "$result" | /usr/bin/jq -r '.totpRequired // false')" == "true" ]]; then

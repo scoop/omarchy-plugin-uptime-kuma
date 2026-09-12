@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const BIN = join(import.meta.dir, "..", "bin");
-const SCRIPTS = ["login.sh", "poll.sh", "authenticate.sh", "read-bounded.sh"];
+const SCRIPTS = ["login.sh", "poll.sh", "authenticate.sh", "read-bounded.sh", "supervise.sh"];
 
 /** Rewritten in the copies so the shims see the calls; must stay absolute in bin/. */
 const SHIMMABLE = ["jq", "secret-tool"];
@@ -50,8 +50,14 @@ let origin;
 /** Every request body the stub server was sent, in order. */
 let received;
 
-/** A stub of just enough Engine.IO for the helpers' sign-in exchange. */
-function startServer(ack, { status = 200, handshake = null } = {}) {
+/**
+ * A stub of just enough Engine.IO for the helpers' sign-in exchange.
+ *
+ * `hang` makes it answer the handshake and the posts and then never answer the
+ * poll, which is what a real long poll looks like from the outside: one curl,
+ * waiting, for as long as the server cares to take.
+ */
+function startServer(ack, { status = 200, handshake = null, hang = false } = {}) {
     received = [];
     return Bun.serve({
         port: 0,
@@ -67,6 +73,9 @@ function startServer(ack, { status = 200, handshake = null } = {}) {
                         '0{"sid":"teststubsid","upgrades":[],"pingInterval":25000,"pingTimeout":20000}',
                     { status },
                 );
+            }
+            if (hang) {
+                return new Promise(() => {});
             }
             return new Response(ack, { status });
         },
@@ -172,7 +181,20 @@ test("the scripts name every binary absolutely, so PATH cannot swap one", () => 
     // A shadow `curl` earlier in PATH receives the password; a shadow `jq`
     // receives it on stdin. `#!/usr/bin/env bash` picks the interpreter the
     // same way.
-    const tools = ["curl", "jq", "tr", "head", "mktemp", "secret-tool", "dd", "rm", "cat", "sed"];
+    const tools = [
+        "curl",
+        "jq",
+        "tr",
+        "head",
+        "mktemp",
+        "secret-tool",
+        "dd",
+        "rm",
+        "cat",
+        "sed",
+        "timeout",
+        "sleep",
+    ];
     for (const name of SCRIPTS) {
         const src = readFileSync(join(BIN, name), "utf8");
         expect(`${name}: ${src.split("\n")[0]}`).toBe(`${name}: #!/usr/bin/bash`);
@@ -586,4 +608,177 @@ test("authenticate.sh refuses a shell.json larger than the cap", async () => {
     expect(code).not.toBe(0);
     expect(stderr).toMatch(/shell\.json/i);
     expect(stdout).not.toContain("Authenticated");
+});
+
+// ----------------------------------------------------------- outliving the caller
+
+/**
+ * The pids of every process whose command line contains `pattern`.
+ *
+ * The helpers keep the address out of their own argv, but curl is handed the
+ * URL as an argument — which makes "is a curl still talking to the stub?" a
+ * question that can be answered from outside the process tree.
+ */
+function matching(pattern) {
+    const found = Bun.spawnSync(["pgrep", "-f", pattern]);
+    return found.stdout
+        .toString()
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+}
+
+/** Waits for a condition, or gives up, so a hung test fails rather than hangs. */
+async function until(predicate, { timeoutMs = 5000 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (predicate()) {
+            return true;
+        }
+        await Bun.sleep(25);
+    }
+    return false;
+}
+
+/**
+ * A helper that forks something long-lived and then waits on it.
+ *
+ * Its child's pid goes to a file rather than to stdout, so a test can pick it
+ * up without reading a stream that is deliberately never going to end.
+ */
+function helperWithChild({ ignoreTerm = false } = {}) {
+    const unique = Math.random().toString(36).slice(2);
+    const path = join(work, `forks-${unique}.sh`);
+    const pidFile = join(work, `forks-${unique}.pid`);
+    writeFileSync(
+        path,
+        [
+            "#!/usr/bin/bash",
+            ignoreTerm ? "trap '' TERM" : "",
+            "/usr/bin/sleep 3600 &",
+            `echo "$!" > ${pidFile}`,
+            "wait",
+            "",
+        ].join("\n"),
+    );
+    chmodSync(path, 0o755);
+    return { path, pidFile };
+}
+
+/** The pid the helper forked, once it has got that far. */
+async function forkedChild(pidFile) {
+    expect(await until(() => existsSync(pidFile))).toBe(true);
+    const pid = readFileSync(pidFile, "utf8").trim();
+    expect(existsSync(`/proc/${pid}`)).toBe(true);
+    return pid;
+}
+
+test("supervise.sh takes the helper's children with it when it is stopped", async () => {
+    // The finding this answers: signalling the shell reaches the shell. Its
+    // curl is a different process, and outlives it as an orphan holding the
+    // connection open.
+    const { path, pidFile } = helperWithChild();
+    const proc = Bun.spawn([join(BIN, "supervise.sh"), "0", path], {
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    const child = await forkedChild(pidFile);
+
+    proc.kill(); // SIGTERM, as Process.signal(15) does from the panel
+
+    await proc.exited;
+    // The supervisor does not exit until the group has gone, so there is
+    // nothing to wait for here: if the child were still running, it would be
+    // running now.
+    expect(existsSync(`/proc/${child}`)).toBe(false);
+});
+
+test("supervise.sh ends a helper that ignores TERM, and its children", async () => {
+    const { path, pidFile } = helperWithChild({ ignoreTerm: true });
+    const proc = Bun.spawn([join(BIN, "supervise.sh"), "1", path], {
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    const child = await forkedChild(pidFile);
+
+    await proc.exited;
+
+    expect(existsSync(`/proc/${child}`)).toBe(false);
+});
+
+test("supervise.sh bounds a helper that produces no output at all", async () => {
+    // A budget on what a helper says bounds nothing when it says nothing. The
+    // deadline is the only thing that ends this one.
+    const started = Date.now();
+    const proc = Bun.spawn([join(BIN, "supervise.sh"), "1", "/usr/bin/sleep", "3600"], {
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    await proc.exited;
+    expect(Date.now() - started).toBeLessThan(10000);
+    expect(proc.exitCode).not.toBe(0);
+});
+
+test("supervise.sh passes stdin, stdout and the exit status through untouched", async () => {
+    const proc = Bun.spawn(
+        [
+            join(BIN, "supervise.sh"),
+            "10",
+            "/usr/bin/bash",
+            "-c",
+            'read -r x; echo "got:$x"; exit 3',
+        ],
+        {
+            stdin: new TextEncoder().encode("value\n"),
+            stdout: "pipe",
+            stderr: "pipe",
+        },
+    );
+    const stdout = await new Response(proc.stdout).text();
+    await proc.exited;
+    expect(stdout.trim()).toBe("got:value");
+    expect(proc.exitCode).toBe(3);
+});
+
+test("supervise.sh refuses to run anything without a deadline it can read", async () => {
+    // "true" without a path is refused too: this is the one door every helper
+    // comes through, so it is where PATH stops being able to choose one.
+    for (const args of [
+        [],
+        ["10"],
+        ["soon", "/usr/bin/true"],
+        ["-1", "/usr/bin/true"],
+        ["10", "true"],
+    ]) {
+        const proc = Bun.spawn([join(BIN, "supervise.sh"), ...args], {
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        await proc.exited;
+        expect(`${args.join(" ")}: ${proc.exitCode}`).toBe(`${args.join(" ")}: 64`);
+    }
+});
+
+test("stopping a supervised poll takes its curl with it", async () => {
+    // The end of the finding, exercised against a server that behaves like a
+    // real one: it answers the handshake and then holds the poll open, so
+    // there is exactly one curl waiting on it when the panel gives up.
+    server = startServer("", { hang: true });
+    const port = server.port;
+    const proc = Bun.spawn([join(BIN, "supervise.sh"), "0", join(BIN, "poll.sh")], {
+        stdin: new TextEncoder().encode(
+            JSON.stringify({ url: `http://127.0.0.1:${port}`, token: TOKEN }) + "\n",
+        ),
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+
+    const pattern = `127\\.0\\.0\\.1:${port}/socket\\.io`;
+    expect(await until(() => matching(pattern).length > 0)).toBe(true);
+
+    proc.kill();
+    await proc.exited;
+
+    expect(matching(pattern)).toEqual([]);
+    server.stop(true);
 });
