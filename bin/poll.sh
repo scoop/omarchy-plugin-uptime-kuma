@@ -15,6 +15,12 @@
 # same way: never an argument, never an environment variable, only ever a pipe
 # between jq and curl, and every binary named by absolute path so that PATH
 # cannot decide which curl receives it. See the note at the top of login.sh.
+#
+# This is meant to be started through bin/supervise.sh, which puts it and its
+# curl in a process group of its own so that one signal ends the session rather
+# than leaving the request open under a shell that has already exited. Nothing
+# here creates a process group of its own, because that would be a way out of
+# the one the supervisor holds.
 
 set -uo pipefail
 
@@ -96,11 +102,16 @@ job=""
 # Bash runs a trap only once the current foreground command has finished, and a
 # long poll is up to a minute of not listening. So every request runs as a
 # background job that this script waits on: waiting is interruptible, and the
-# handler can then kill the whole job group — the subshell and the curl inside
-# it — rather than leaving both reparented to init when the shell goes away.
+# handler gets to run at all.
+#
+# What it does not do is reach the curl inside that job. Signalling a process
+# group from here would mean giving each job a group of its own, and a job in
+# its own group is a job that has escaped the group supervise.sh holds — which
+# is the one thing that reaches everything. So this kills what it can, removes
+# the files it made, and leaves the group to the supervisor.
 cleanup() {
     if [[ -n $job ]]; then
-        kill -- -"$job" 2>/dev/null || kill -- "$job" 2>/dev/null
+        kill -- "$job" 2>/dev/null
     fi
     /usr/bin/rm -f -- "$jar" "$body_file"
 }
@@ -133,7 +144,9 @@ fetch() {
     : >"$body_file"
     { "${curl_common[@]}" "$@" | /usr/bin/head -c $((MAX_BODY + 1)) >"$body_file"; } &
     job=$!
-    wait "$job"
+    # 2>/dev/null: bash announces a job that died from a signal ("Terminated"),
+    # and the panel reads this stream as a diagnostic from the helper.
+    wait "$job" 2>/dev/null
     rc=$?
     job=""
     out="$(<"$body_file")"
@@ -168,7 +181,7 @@ post() {
             /usr/bin/head -c $((MAX_BODY + 1)) >/dev/null
     } &
     job=$!
-    wait "$job"
+    wait "$job" 2>/dev/null
     rc=$?
     job=""
     return "$rc"
@@ -188,7 +201,7 @@ post '40' || die "Could not open the socket namespace"
         /usr/bin/head -c $((MAX_BODY + 1)) >/dev/null
 } &
 job=$!
-wait "$job" || die "Could not present the session token"
+wait "$job" 2>/dev/null || die "Could not present the session token"
 job=""
 
 # A refused token does not close the socket: the server simply never sends a

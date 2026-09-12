@@ -91,7 +91,8 @@ Item {
     BoundedProcess {
         id: themeProc
         maxBytes: root._themeMaxBytes
-        command: [root._pluginDir + "bin/read-bounded.sh", themeWatcher.path, String(root._themeMaxBytes)]
+        deadlineSeconds: 10
+        program: [root._pluginDir + "bin/read-bounded.sh", themeWatcher.path, String(root._themeMaxBytes)]
         onFinishedWith: function (text, tooLarge) {
             // An oversized theme file is a refusal, not something to parse.
             if (tooLarge || text.length === 0) {
@@ -125,27 +126,57 @@ Item {
     }
 
     function stop() {
-        // running = false sends TERM to the helper. Its curl child is not
-        // reached by that, so the escalation below is what actually ends the
-        // session if the helper does not go quietly.
+        // TERM reaches bin/supervise.sh, which passes it to the process group
+        // holding poll.sh and its curl and arms the KILL that follows. Ending
+        // the helper alone would leave that curl holding the connection, and
+        // the session cookie with it.
         if (pollProc.running) {
             pollProc.signal(15);
             pollKillTimer.restart();
         }
         pollProc.running = false;
         retryTimer.stop();
+        idleTimer.stop();
         _pending = "";
         _stderrPending = "";
     }
 
+    // The last resort, for a supervisor that is itself wedged. By the time this
+    // fires the group is already under the supervisor's own escalation, armed
+    // when the TERM above arrived — so this is about releasing the handle, not
+    // about ending the session.
     Timer {
         id: pollKillTimer
-        interval: 2000
+        interval: 6000
         repeat: false
         onTriggered: if (pollProc.running) pollProc.signal(9)
     }
 
-    // A shell that is going away should not leave a poll behind it.
+    /**
+     * A session that has gone quiet is a session that has ended without saying so.
+     *
+     * The poll has no deadline — it is meant to run until it is stopped — so
+     * this is what keeps "no output" from meaning "forever". Engine.IO sends a
+     * ping every pingInterval, 25 seconds by default, and each long poll is
+     * capped at 60 seconds by curl, so several minutes of silence is not a slow
+     * instance: it is a connection that is no longer there.
+     *
+     * Stopping the poll is all this does: the reconnect is pollProc's own
+     * business, and it is the same reconnect as for a session that ended by
+     * saying so.
+     */
+    Timer {
+        id: idleTimer
+        interval: 180000
+        repeat: false
+        onTriggered: {
+            root.lastError = "Uptime Kuma stopped answering";
+            root.stop();
+        }
+    }
+
+    // A shell that is going away should not leave a poll behind it. running =
+    // false sends TERM to the supervisor, which is what takes the group down.
     Component.onDestruction: {
         pollProc.running = false;
     }
@@ -170,7 +201,8 @@ Item {
     BoundedProcess {
         id: tokenProc
         maxBytes: root._tokenMaxChars
-        command: [
+        deadlineSeconds: 20
+        program: [
             "/usr/bin/secret-tool",
             "lookup",
             "service",
@@ -192,7 +224,8 @@ Item {
     BoundedProcess {
         id: forgetProc
         maxBytes: 4096
-        command: ["/usr/bin/secret-tool", "clear", "service", "scoop.uptime-kuma", "account", root.username]
+        deadlineSeconds: 20
+        program: ["/usr/bin/secret-tool", "clear", "service", "scoop.uptime-kuma", "account", root.username]
     }
 
     /**
@@ -213,8 +246,13 @@ Item {
     BoundedProcess {
         id: loginProc
         maxBytes: root._replyMaxChars
+        // Long enough for a slow instance to answer every leg of the exchange
+        // — handshake, two posts, up to six polls, each of them bounded by
+        // curl's own --max-time — and short enough that a sign-in that is
+        // never going to finish is over before the person tries again.
+        deadlineSeconds: 120
         property string payload: ""
-        command: [root._pluginDir + "bin/login.sh"]
+        program: [root._pluginDir + "bin/login.sh"]
         stdinEnabled: true
         onStarted: {
             write(payload + "\n");
@@ -250,8 +288,9 @@ Item {
     BoundedProcess {
         id: storeProc
         maxBytes: 4096
+        deadlineSeconds: 20
         property string token: ""
-        command: [
+        program: [
             "/usr/bin/secret-tool",
             "store",
             "--label=Uptime Kuma session (scoop.uptime-kuma)",
@@ -272,7 +311,11 @@ Item {
 
     Process {
         id: pollProc
-        command: [root._pluginDir + "bin/poll.sh"]
+        // Supervised like every other helper, with no deadline: this one is
+        // meant to run until it is stopped. What bounds it instead is
+        // idleTimer, and the supervisor is what makes stopping it reach the
+        // curl inside. See BoundedProcess.qml, which wraps the same way.
+        command: [root._pluginDir + "bin/supervise.sh", "0", root._pluginDir + "bin/poll.sh"]
         clearEnvironment: true
         environment: ({
                 PATH: "/usr/bin:/bin",
@@ -291,6 +334,7 @@ Item {
                 }) + "\n",
             );
             stdinEnabled = false;
+            idleTimer.restart();
         }
         // Raw chunks, with the lines assembled here.
         //
@@ -315,6 +359,7 @@ Item {
             }
         }
         onExited: function (exitCode) {
+            idleTimer.stop();
             if (root._demo) {
                 return;
             }
@@ -376,7 +421,8 @@ Item {
     BoundedProcess {
         id: demoProc
         maxBytes: root._demoMaxBytes
-        command: [
+        deadlineSeconds: 10
+        program: [
             root._pluginDir + "bin/read-bounded.sh",
             root._pluginDir + "demo/snapshot.json",
             String(root._demoMaxBytes),
@@ -422,6 +468,7 @@ Item {
      * parser could complain, the allocation it would complain about exists.
      */
     function _ingest(chunk) {
+        idleTimer.restart();
         if (_pending.length + chunk.length > _payloadMaxChars) {
             root.lastError = "Ignored an oversized response from Uptime Kuma";
             _pending = "";

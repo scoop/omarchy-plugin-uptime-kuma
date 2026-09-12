@@ -57,6 +57,12 @@ Neither the password, the two-factor code nor the token is ever passed to
 another program as a command-line argument or an environment variable, both of
 which any process running as you can read. They travel on pipes.
 
+Every helper the panel starts runs under `bin/supervise.sh`, in a process group
+of its own and — apart from the poll, which runs until it is stopped — under a
+deadline. Stopping one therefore stops the `curl` inside it too, rather than
+leaving a request open under a shell that has already exited, and the supervisor
+confirms the group has gone before it reports that it has.
+
 An `https://` address, or an `http://` one pointing at this machine, connects
 without comment. An `http://` address pointing anywhere else would put your
 password and your session token on the wire where anything in between can read
@@ -131,9 +137,12 @@ of which you may want to clear yourself:
 
 Nothing else is left behind: no cache, no state directory, and no service,
 timer, hook or scheduled job — the plugin installs none. While a connection is
-open the helper holds a cookie jar in `/tmp`, created by `mktemp` and readable
-only by you; it is deleted when that connection ends. The keybinding is the one
-you added by hand, so it is yours to remove.
+open the helper holds a cookie jar in `$XDG_RUNTIME_DIR`, created by `mktemp`
+and readable only by you; it is deleted when that connection ends, and without a
+private runtime directory the helper refuses to start rather than falling back
+to shared `/tmp`. No process outlives the shell: each helper is torn down as a
+process group when the panel stops it. The keybinding is the one you added by
+hand, so it is yours to remove.
 
 ## Developing
 
