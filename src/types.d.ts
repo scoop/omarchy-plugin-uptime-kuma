@@ -94,6 +94,8 @@ interface Row {
     id: number | string;
     label: string;
     detail: string;
+    /** Indent level: 0 at the top of the list, 1 inside a group. */
+    depth: number;
     status: string;
     error: string;
     selectable: boolean;

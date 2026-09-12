@@ -32,6 +32,7 @@ test("a Problems section is announced, then its monitors", () => {
         id: "problems",
         label: "Problems",
         detail: "",
+        depth: 0,
         status: "down",
         error: "",
         monitor: null,
@@ -95,6 +96,18 @@ test("ungrouped monitors are listed after the groups", () => {
     const lastGroup = rows.map((r) => r.type).lastIndexOf("group");
 
     expect(rows.findIndex((r) => r.id === 4 && r.type === "monitor")).toBeGreaterThan(lastGroup);
+});
+
+test("an ungrouped monitor sits at the top level, not indented under the last group", () => {
+    const rows = flatten(view, "", { 10: true, 20: true });
+
+    expect(rows.find((r) => r.id === 4 && r.type === "monitor").depth).toBe(0);
+    expect(rows.find((r) => r.id === 3 && r.type === "monitor").depth).toBe(1);
+});
+
+test("a pinned problem hangs off the Problems heading rather than a group", () => {
+    expect(flatten(view, "", {})[1].depth).toBe(0);
+    expect(flatten(view, "", {}).find((r) => r.type === "group").depth).toBe(0);
 });
 
 test("a filter narrows to matching monitors and drops groups with no match", () => {
