@@ -491,7 +491,9 @@ Item {
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                anchors.leftMargin: Style.space(rowItem.isGroup ? 8 : 20)
+                                // Indent says what a row hangs off. Only a
+                                // group's children hang off anything.
+                                anchors.leftMargin: Style.space(rowItem.modelData.depth > 0 ? 20 : 8)
                                 anchors.rightMargin: Style.space(10)
                                 spacing: Style.space(8)
 

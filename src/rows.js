@@ -38,12 +38,17 @@ function monitorDetail(monitor) {
     return "";
 }
 
-function monitorRow(monitor, detail) {
+function monitorRow(monitor, detail, depth) {
     return {
         type: "monitor",
         id: monitor.id,
         label: monitor.name,
         detail: detail,
+        // How far in the Pane sets the row. Indentation is the only thing
+        // saying what a row hangs off, so a monitor with no group sits at the
+        // top level beside the groups rather than inside whichever one the
+        // list last drew.
+        depth: depth,
         status: monitor.status,
         error: monitor.error || "",
         // The whole monitor rides along, so the Pane can hand the selected row
@@ -60,6 +65,7 @@ function sectionRow(id, label, status) {
         id: id,
         label: label,
         detail: "",
+        depth: 0,
         status: status,
         error: "",
         monitor: null,
@@ -107,7 +113,7 @@ function flatten(view, filterText, opened) {
         if (filter && !matches(problems[i].name, filter)) {
             continue;
         }
-        problemRows.push(monitorRow(problems[i], groupNameFor[problems[i].id] || ""));
+        problemRows.push(monitorRow(problems[i], groupNameFor[problems[i].id] || "", 0));
     }
     if (problemRows.length > 0) {
         rows.push(sectionRow("problems", "Problems", "down"));
@@ -138,6 +144,7 @@ function flatten(view, filterText, opened) {
             type: "group",
             id: group.id,
             label: group.name,
+            depth: 0,
             // A healthy group has nothing to report but its size. Saying
             // "0 down" on eleven groups buries the one that says "1 down".
             detail: groupDetail(group.children),
@@ -157,7 +164,7 @@ function flatten(view, filterText, opened) {
         }
 
         for (j = 0; j < children.length; j++) {
-            rows.push(monitorRow(children[j], monitorDetail(children[j])));
+            rows.push(monitorRow(children[j], monitorDetail(children[j]), 1));
         }
     }
 
@@ -166,7 +173,7 @@ function flatten(view, filterText, opened) {
         if (filter && !matches(ungrouped[i].name, filter)) {
             continue;
         }
-        rows.push(monitorRow(ungrouped[i], monitorDetail(ungrouped[i])));
+        rows.push(monitorRow(ungrouped[i], monitorDetail(ungrouped[i]), 0));
     }
 
     return rows;
