@@ -7,8 +7,8 @@ updates:
       schedule:
           interval: weekly
       open-pull-requests-limit: 5
-    # The actions in ci.yml are pinned by tag, so an update here is how a fix
-    # reaches them.
+    # The actions in ci.yml and release.yml are pinned by tag, so an update here
+    # is how a fix reaches them.
     - package-ecosystem: github-actions
       directory: /
       schedule:
