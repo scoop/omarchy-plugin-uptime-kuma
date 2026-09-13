@@ -1,0 +1,75 @@
+name: Release
+
+on:
+    push:
+        branches: [main]
+
+# release-please opens and maintains the release pull request, and creates the
+# tag and the GitHub release when that pull request is merged. Creating the pull
+# request also needs "Allow GitHub Actions to create and approve pull requests"
+# enabled on the repository; the token permission alone is not sufficient.
+permissions:
+    contents: write
+    issues: write
+    pull-requests: write
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        steps:
+            # Only so the verification step can read the plugin id out of the
+            # manifest rather than carry a second copy of it. release-please
+            # itself works entirely through the API.
+            - uses: actions/checkout@v7
+
+            - uses: googleapis/release-please-action@v4
+              id: release
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            # Merging the release pull request puts another commit on main, and
+            # it is that commit — not the one before it — the marketplace has to
+            # verify, or the verified snapshot is superseded the moment it lands.
+            # The form cannot be filled in from here: its acknowledgment is a
+            # required checkbox, meant for a person to tick. So publish a link
+            # with everything else already filled in, and leave the tick.
+            - name: Marketplace verification link
+              if: ${{ steps.release.outputs.release_created == 'true' }}
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  TAG: ${{ steps.release.outputs.tag_name }}
+              run: |
+                  set -euo pipefail
+
+                  [[ -n "$TAG" ]] || { echo "release-please reported a release but no tag name"; exit 1; }
+
+                  enc() { printf %s "$1" | jq -sRr @uri; }
+
+                  plugin_id=$(jq -r .id manifest.json)
+                  repo_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+
+                  url="$GITHUB_SERVER_URL/omacom/omarchy-plugin-marketplace/issues/new?template=verify-plugin.yml"
+                  url="$url&title=$(enc "[Verify]: $plugin_id $TAG")"
+                  url="$url&verification-action=$(enc "Verify and publish a newer upstream commit")"
+                  url="$url&plugin-id=$(enc "$plugin_id")"
+                  url="$url&repository=$(enc "$repo_url")"
+                  url="$url&target-commit=$(enc "$GITHUB_SHA")"
+
+                  {
+                    echo "## Marketplace verification"
+                    echo
+                    echo "\`$TAG\` is tagged at \`$GITHUB_SHA\`. Submit that commit, not the one before it."
+                    echo
+                    echo "[Open the prefilled verification issue]($url) — tick the acknowledgment and submit."
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+                  # Same link on the release itself, where it survives the run's
+                  # retention and is one click from the release notification.
+                  notes=$(mktemp)
+                  gh release view "$TAG" --json body --jq .body > "$notes"
+                  # Two leading newlines, not one: a bare --- on the line after
+                  # text is a setext heading, and the release body may or may not
+                  # end in a newline of its own.
+                  printf '\n\n---\n\n<sub>Maintainer: [submit `%s` for marketplace verification](%s).</sub>\n' \
+                    "$GITHUB_SHA" "$url" >> "$notes"
+                  gh release edit "$TAG" --notes-file "$notes"

@@ -1,0 +1,13 @@
+# Both files below are written by release-please through the GitHub API, where
+# neither husky nor lint-staged can reach them. Prettier disagrees with what it
+# writes, and prettier loses: the release pull request cannot be reformatted
+# before CI sees it.
+
+# Prettier would rewrite the list markers of a generated changelog.
+CHANGELOG.md
+
+# release-please re-serialises the whole file to bump the version, which expands
+# short arrays that prettier insists on collapsing. `kinds` below is stored in
+# release-please's shape so that a release pull request touches exactly one line
+# here. The CI "Plugin manifest" job still validates this file.
+manifest.json
