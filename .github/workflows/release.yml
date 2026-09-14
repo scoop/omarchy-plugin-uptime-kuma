@@ -22,7 +22,7 @@ jobs:
             # itself works entirely through the API.
             - uses: actions/checkout@v7
 
-            - uses: googleapis/release-please-action@v4
+            - uses: googleapis/release-please-action@v5
               id: release
               with:
                   token: ${{ secrets.GITHUB_TOKEN }}
