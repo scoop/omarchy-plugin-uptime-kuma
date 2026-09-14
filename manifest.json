@@ -2,7 +2,7 @@
     "schemaVersion": 1,
     "id": "scoop.uptime-kuma",
     "name": "Uptime Kuma",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "author": "scoop",
     "description": "Operator view of an Uptime Kuma instance: monitor groups, the error text of a failed check, and live updates over Uptime Kuma's own socket interface. The bar stays empty until something breaks.",
     "license": "MIT",
