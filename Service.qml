@@ -370,6 +370,9 @@ Item {
             }
         }
         onExited: function (exitCode) {
+            // The KILL was for the poll that has just gone. Left armed, it
+            // lands on whichever poll is running when it fires.
+            pollKillTimer.stop();
             // The poll start() replaced, not the one now starting: see there.
             if (root._replacing) {
                 root._replacing = false;

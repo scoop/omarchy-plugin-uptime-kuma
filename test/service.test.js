@@ -27,6 +27,13 @@ const UNAVAILABLE = !Bun.which("quickshell") || !process.env.WAYLAND_DISPLAY;
 // loop has gone round several times by the time this is up.
 const WINDOW_MS = 4000;
 
+/** How long after a stop the service sends its last-resort KILL. */
+// Read out of the service rather than restated, for the reason scripts.test.js
+// gives for MAX_BODY: a copy of the number stops testing the number.
+const KILL_AFTER_MS = Number(
+    /id: pollKillTimer\s+interval: (\d+)/.exec(readFileSync(join(ROOT, "Service.qml"), "utf8"))[1],
+);
+
 let work;
 let server;
 let shell;
@@ -70,7 +77,7 @@ function startServer() {
  * real shell, and because Qt.resolvedUrl(".") at the root of a config comes
  * back without its trailing slash, which is what the helper paths are built on.
  */
-async function runService(script) {
+async function runService(script, windowMs = WINDOW_MS) {
     const root = mkdtempSync(join(work, "cfg-"));
     const plugin = join(root, "plugin");
     const lookups = join(root, "lookups.log");
@@ -136,7 +143,7 @@ async function runService(script) {
             '        svc.username = "";',
             "    }",
             script,
-            `    Timer { interval: ${WINDOW_MS}; running: true; onTriggered: Qt.quit() }`,
+            `    Timer { interval: ${windowMs}; running: true; onTriggered: Qt.quit() }`,
             "}",
             "",
         ].join("\n"),
@@ -184,24 +191,29 @@ test.skipIf(UNAVAILABLE)(
         expect(handshakes).toBe(1);
         expect(states).not.toContain("unreachable");
     },
-    15000,
+    20000,
 );
 
 test.skipIf(UNAVAILABLE)(
     "starting over a running poll replaces it once, and is not read as a lost connection",
     async () => {
         // What `refresh` and a sign-in from the form both do.
+        //
+        // Watched until well past the last-resort KILL that stopping the old
+        // poll armed: left armed, it lands on the replacement instead, and the
+        // poll that was replaced once is replaced again a few seconds later.
         server = startServer();
         const { states, lookups } = await runService(
             [
                 "    Timer { interval: 200; running: true; onTriggered: harness.real() }",
                 "    Timer { interval: 1500; running: true; onTriggered: svc.start() }",
             ].join("\n"),
+            1500 + KILL_AFTER_MS + 3000,
         );
 
         expect(lookups).toBe(1);
         expect(handshakes).toBe(2);
         expect(states).not.toContain("unreachable");
     },
-    15000,
+    20000,
 );
