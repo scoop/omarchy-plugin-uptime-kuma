@@ -47,6 +47,8 @@ Item {
     property var _stats: ({})
     property string _token: ""
     property int _backoffMs: 1000
+    // Set while a poll that start() replaced has yet to report its exit.
+    property bool _replacing: false
 
     // Everything crossing a process boundary gets a ceiling. A token is a few
     // hundred bytes, the login helper answers with one small JSON object, and
@@ -120,6 +122,11 @@ Item {
         if (!configured || _token === "") {
             return;
         }
+        // Quickshell reports the exit of a poll that is replaced while it is
+        // still running before it starts the replacement. That exit is not a
+        // lost connection, and reading it as one schedules a retry that kills
+        // the healthy replacement in turn — once a second, forever.
+        _replacing = pollProc.running;
         stop();
         connection = "connecting";
         pollProc.running = true;
@@ -192,7 +199,11 @@ Item {
     // ------------------------------------------------------------------- secrets
 
     function readToken() {
-        if (!configured) {
+        // Asking again while a lookup is under way does not get ignored:
+        // Quickshell queues a second run, and each one ends in start(). A
+        // second bar causes exactly that at startup, because its Indicator
+        // pushes blank settings before it pushes the real ones.
+        if (!configured || tokenProc.running) {
             return;
         }
         tokenProc.running = true;
@@ -359,6 +370,11 @@ Item {
             }
         }
         onExited: function (exitCode) {
+            // The poll start() replaced, not the one now starting: see there.
+            if (root._replacing) {
+                root._replacing = false;
+                return;
+            }
             idleTimer.stop();
             if (root._demo) {
                 return;
