@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/scoop/omarchy-plugin-uptime-kuma/compare/v1.1.0...v1.1.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* a replaced poll's exit was read as a lost connection ([#14](https://github.com/scoop/omarchy-plugin-uptime-kuma/issues/14)) ([f7b8be8](https://github.com/scoop/omarchy-plugin-uptime-kuma/commit/f7b8be8a75590f34973623d7e0cc342fca831fa8))
+* a second sign-in never got an answer, and lastError was never shown ([#16](https://github.com/scoop/omarchy-plugin-uptime-kuma/issues/16)) ([46bf44a](https://github.com/scoop/omarchy-plugin-uptime-kuma/commit/46bf44a138f00e54b87899b4ddaa0cfe50becb73)), closes [#13](https://github.com/scoop/omarchy-plugin-uptime-kuma/issues/13)
+
 ## [1.1.0](https://github.com/scoop/omarchy-plugin-uptime-kuma/compare/v1.0.0...v1.1.0) (2026-09-14)
 
 
