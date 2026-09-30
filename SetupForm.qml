@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
 import "src/connection.js" as Setup
+import "src/sanitize.js" as Sanitize
 
 // Connecting, without leaving the pane.
 //
@@ -65,6 +66,11 @@ ColumnLayout {
     property string problem: ""
     property string problemField: ""
 
+    // What went wrong last on the service's side — an expired session, a helper
+    // that said why it failed. Cleared by the service once connected, and when a
+    // sign-in starts.
+    readonly property string serviceError: Sanitize.plain(service ? service.lastError : "", 160)
+
     // False once a write to shell.json was attempted and refused.
     property bool persisted: true
 
@@ -96,10 +102,14 @@ ColumnLayout {
         if (totpRequired) {
             return "This account has two-factor enabled. Enter the current code.";
         }
+        if (serviceError !== "") {
+            return serviceError;
+        }
         return "Your password is exchanged for a session token and never stored.";
     }
 
-    readonly property bool statusIsProblem: !busy && (problem !== "" || !persisted)
+    readonly property bool statusIsProblem:
+        !busy && (problem !== "" || !persisted || (!totpRequired && serviceError !== ""))
 
     // ------------------------------------------------------------------ actions
 
