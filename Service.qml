@@ -129,6 +129,8 @@ Item {
         _replacing = pollProc.running;
         stop();
         connection = "connecting";
+        // See authenticate().
+        pollProc.stdinEnabled = true;
         pollProc.running = true;
     }
 
@@ -222,6 +224,12 @@ Item {
             root.username,
         ]
         onFinishedWith: function (text, tooLarge) {
+            // A sign-in that finished while this was being looked up has
+            // already supplied the token, and started the poll with it. What
+            // the keyring said before that is older news.
+            if (root._token !== "") {
+                return;
+            }
             var value = tooLarge ? "" : text.trim();
             if (value === "") {
                 root.connection = "setup";
@@ -251,6 +259,13 @@ Item {
             totp: totp || "",
             allowPlaintext: root.allowPlaintext,
         });
+        root.lastError = "";
+        // onStarted closes stdin once the request is written, and nothing else
+        // opens it again. Quickshell only closes a stdin on the change to
+        // false, so a second run left at false is handed the request and never
+        // told it has ended: login.sh reads to the end, and waits out its
+        // deadline. The same goes for storeProc and pollProc.
+        loginProc.stdinEnabled = true;
         loginProc.running = true;
     }
 
@@ -283,6 +298,7 @@ Item {
             if (result.ok && result.token) {
                 root._token = result.token;
                 storeProc.token = result.token;
+                storeProc.stdinEnabled = true;
                 storeProc.running = true;
                 root.start();
                 return;
@@ -544,6 +560,8 @@ Item {
 
         if (changed) {
             root._backoffMs = 1000;
+            // Whatever went wrong before, this session is the answer to it.
+            root.lastError = "";
             root.connection = "connected";
             root.lastUpdate = Date.now();
             rebuildTimer.restart();

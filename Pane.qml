@@ -378,19 +378,43 @@ Item {
                     // tell.
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: staleText.implicitHeight + Style.space(14)
+                        Layout.preferredHeight: staleColumn.implicitHeight + Style.space(14)
                         visible: root.connection === "unreachable"
                         color: Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.14)
                         radius: Style.space(6)
 
-                        Text {
-                            id: staleText
+                        ColumnLayout {
+                            id: staleColumn
                             anchors.centerIn: parent
-                            text: "Can't reach Uptime Kuma — showing the last known state"
-                            color: root.foreground
-                            font.family: root.fontFamily
-                            font.pixelSize: Style.font.caption
-                            textFormat: Text.PlainText
+                            width: parent.width - Style.space(20)
+                            spacing: Style.space(2)
+
+                            Text {
+                                Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignHCenter
+                                text: "Can't reach Uptime Kuma — showing the last known state"
+                                color: root.foreground
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                                textFormat: Text.PlainText
+                            }
+
+                            // Why, as the helper put it. It comes from a curl
+                            // talking to a server, so it is treated like any
+                            // other text from outside.
+                            Text {
+                                Layout.fillWidth: true
+                                visible: text !== ""
+                                horizontalAlignment: Text.AlignHCenter
+                                text: Sanitize.plain(root.service ? root.service.lastError : "", 160)
+                                color: root.dim
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.font.caption
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                                textFormat: Text.PlainText
+                            }
                         }
                     }
 

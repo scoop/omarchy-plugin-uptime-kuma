@@ -15,7 +15,15 @@
 // tests are skipped — which is what happens in CI.
 
 import { test, expect, beforeAll, afterEach } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, chmodSync } from "node:fs";
+import {
+    mkdtempSync,
+    mkdirSync,
+    writeFileSync,
+    readFileSync,
+    cpSync,
+    chmodSync,
+    existsSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,12 +45,23 @@ const KILL_AFTER_MS = Number(
 let work;
 let server;
 let shell;
-/** How many sessions were opened, which is how many polls were started. */
+/** How many sessions were opened: one per poll, and one per sign-in. */
 let handshakes;
+/** How many of those sessions were sign-ins, which is how many times login.sh got its request. */
+let logins;
 
-/** Just enough Engine.IO to hold a session open: a handshake, then a poll that never answers. */
+/**
+ * Just enough Engine.IO for a sign-in and a session: a handshake, the
+ * acknowledgement the helper is waiting for, and then a poll that never answers.
+ *
+ * What a session is for is learnt from what is posted to it: `login` is
+ * login.sh, and gets a token back; `loginByToken` is poll.sh, and gets an
+ * empty monitor list, which is what makes the service call itself connected.
+ */
 function startServer() {
     handshakes = 0;
+    logins = 0;
+    const kinds = new Map();
     return Bun.serve({
         port: 0,
         async fetch(request) {
@@ -52,15 +71,30 @@ function startServer() {
             if (url.pathname !== "/socket.io/") {
                 return new Response("", { status: 404 });
             }
+            const sid = url.searchParams.get("sid");
             if (request.method === "POST") {
-                await request.text();
+                const body = await request.text();
+                if (body.includes('"login"')) {
+                    logins++;
+                    kinds.set(sid, "login");
+                } else if (body.includes('"loginByToken"')) {
+                    kinds.set(sid, "poll");
+                }
                 return new Response("ok");
             }
-            if (!url.searchParams.get("sid")) {
+            if (!sid) {
                 handshakes++;
                 return new Response(
-                    '0{"sid":"teststubsid","upgrades":[],"pingInterval":25000,"pingTimeout":20000}',
+                    `0{"sid":"teststubsid${handshakes}","upgrades":[],"pingInterval":25000,"pingTimeout":20000}`,
                 );
+            }
+            const kind = kinds.get(sid);
+            kinds.delete(sid);
+            if (kind === "login") {
+                return new Response('430[{"ok":true,"token":"TESTTOKEN"}]');
+            }
+            if (kind === "poll") {
+                return new Response('430[{"ok":true}]\x1e42["monitorList",{}]');
             }
             return new Promise(() => {});
         },
@@ -72,28 +106,39 @@ function startServer() {
  *
  * `script` is the body of the harness: QML declarations that drive `svc`, with
  * `real()` and `blank()` standing in for an Indicator pushing its settings.
+ * `stored` is what the keyring holds for the account — "" for a first sign-in —
+ * and `lookupSeconds` how long it takes to say so.
  *
  * The plugin sits in a subdirectory because that is where a plugin sits in the
  * real shell, and because Qt.resolvedUrl(".") at the root of a config comes
  * back without its trailing slash, which is what the helper paths are built on.
  */
-async function runService(script, windowMs = WINDOW_MS) {
+async function runService(
+    script,
+    windowMs = WINDOW_MS,
+    { stored = "TESTTOKEN", lookupSeconds = 0.3 } = {},
+) {
     const root = mkdtempSync(join(work, "cfg-"));
     const plugin = join(root, "plugin");
-    const lookups = join(root, "lookups.log");
+    const calls = join(root, "secret-tool.log");
     mkdirSync(plugin);
     mkdirSync(join(root, "Commons"));
 
-    // Slow enough that a second request for the token arrives while the first
-    // is still being answered, as it does with a real keyring.
+    // A lookup is slow enough that a second request for the token arrives
+    // while the first is still being answered, as it does with a real keyring.
+    // A store reads its secret to the end, as the real one does: a caller that
+    // never closes stdin is a store that never finishes.
     const shim = join(root, "secret-tool");
     writeFileSync(
         shim,
         [
             "#!/usr/bin/bash",
-            `echo lookup >> ${lookups}`,
-            "/usr/bin/sleep 0.3",
-            "echo TESTTOKEN",
+            `echo "$1" >> ${calls}`,
+            'case "$1" in',
+            `    lookup) /usr/bin/sleep ${lookupSeconds}; [[ -n "${stored}" ]] && echo "${stored}" ;;`,
+            "    store) /usr/bin/cat > /dev/null ;;",
+            "esac",
+            "exit 0",
             "",
         ].join("\n"),
     );
@@ -133,6 +178,7 @@ async function runService(script, windowMs = WINDOW_MS) {
             "    Service {",
             "        id: svc",
             '        onConnectionChanged: console.log("HARNESS connection " + connection)',
+            '        onLoginFailed: function (message) { console.log("HARNESS loginFailed") }',
             "    }",
             "    function real() {",
             `        svc.baseUrl = "http://127.0.0.1:${server.port}";`,
@@ -160,7 +206,13 @@ async function runService(script, windowMs = WINDOW_MS) {
     for (const match of (stdout + stderr).matchAll(/HARNESS connection (\w+)/g)) {
         states.push(match[1]);
     }
-    return { states, lookups: readFileSync(lookups, "utf8").trim().split("\n").length };
+    const called = existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : [];
+    return {
+        states,
+        failures: [...(stdout + stderr).matchAll(/HARNESS loginFailed/g)].length,
+        lookups: called.filter((c) => c === "lookup").length,
+        stores: called.filter((c) => c === "store").length,
+    };
 }
 
 beforeAll(() => {
@@ -214,6 +266,51 @@ test.skipIf(UNAVAILABLE)(
         expect(lookups).toBe(1);
         expect(handshakes).toBe(2);
         expect(states).not.toContain("unreachable");
+    },
+    20000,
+);
+
+test.skipIf(UNAVAILABLE)(
+    "a second sign-in is answered, and its token stored",
+    async () => {
+        // What a wrong password, a two-factor prompt or an expired session is
+        // followed by: the form hands the service a password again. The helper
+        // reads its request to the end, so a request that is written but never
+        // closed is a sign-in that waits out its deadline.
+        server = startServer();
+        const { states, stores, failures } = await runService(
+            [
+                '    Timer { interval: 200; running: true; onTriggered: { harness.real(); svc.authenticate("pw", ""); } }',
+                '    Timer { interval: 1500; running: true; onTriggered: svc.authenticate("pw", "") }',
+            ].join("\n"),
+            WINDOW_MS,
+            { stored: "" },
+        );
+
+        expect(logins).toBe(2);
+        expect(stores).toBe(2);
+        expect(failures).toBe(0);
+        expect(states.at(-1)).toBe("connected");
+    },
+    20000,
+);
+
+test.skipIf(UNAVAILABLE)(
+    "an empty token lookup that finishes after a sign-in does not ask for credentials again",
+    async () => {
+        // What the form does on a first sign-in: setting the address and the
+        // username starts a lookup of a token that is not there yet, and the
+        // password goes to the helper straight after. The helper can win.
+        server = startServer();
+        const { states } = await runService(
+            '    Timer { interval: 200; running: true; onTriggered: { harness.real(); svc.authenticate("pw", ""); } }',
+            WINDOW_MS,
+            { stored: "", lookupSeconds: 1 },
+        );
+
+        expect(logins).toBe(1);
+        expect(states).not.toContain("setup");
+        expect(states.at(-1)).toBe("connected");
     },
     20000,
 );
