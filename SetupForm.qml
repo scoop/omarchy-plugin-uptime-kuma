@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "src/connection.js" as Setup
 import "src/sanitize.js" as Sanitize
@@ -33,7 +34,7 @@ ColumnLayout {
     property string moduleName: ""
 
     // Palette. Defaults suit the menu surfaces the Pane is drawn on.
-    property color foreground: Color.menu.text
+    property color foreground: Commons.Color.menu.text
     property string fontFamily: Style.font.menuFamily
     readonly property color dim: Qt.darker(foreground, 1.4)
 
@@ -375,7 +376,7 @@ ColumnLayout {
             enabled: !root.busy
             placeholderText: "https://kuma.example.com"
             foreground: root.foreground
-            accent: root.problemField === "baseUrl" ? Color.urgent : Color.accent
+            accent: root.problemField === "baseUrl" ? Commons.Color.urgent : Commons.Color.accent
             font.family: root.fontFamily
             onAccepted: root.submit()
             Keys.onEscapePressed: function (event) {
@@ -396,7 +397,7 @@ ColumnLayout {
         description: "http:// carries your password and session token in the clear, where anything between this machine and that one can read them."
         checked: root.allowPlaintext
         foreground: root.foreground
-        accent: root.problemField === "allowPlaintext" ? Color.urgent : Color.accent
+        accent: root.problemField === "allowPlaintext" ? Commons.Color.urgent : Commons.Color.accent
         fontFamily: root.fontFamily
         onClicked: root.allowPlaintext = !root.allowPlaintext
         Keys.onEscapePressed: function (event) {
@@ -424,7 +425,7 @@ ColumnLayout {
             enabled: !root.busy
             placeholderText: "you"
             foreground: root.foreground
-            accent: root.problemField === "username" ? Color.urgent : Color.accent
+            accent: root.problemField === "username" ? Commons.Color.urgent : Commons.Color.accent
             font.family: root.fontFamily
             onAccepted: root.submit()
             Keys.onEscapePressed: function (event) {
@@ -457,7 +458,7 @@ ColumnLayout {
             password: true
             placeholderText: "Exchanged for a token, never stored"
             foreground: root.foreground
-            accent: root.problemField === "password" ? Color.urgent : Color.accent
+            accent: root.problemField === "password" ? Commons.Color.urgent : Commons.Color.accent
             font.family: root.fontFamily
             onAccepted: root.submit()
             Keys.onEscapePressed: function (event) {
@@ -491,7 +492,7 @@ ColumnLayout {
             inputMethodHints: Qt.ImhDigitsOnly
             maximumLength: 8
             foreground: root.foreground
-            accent: root.problemField === "totp" ? Color.urgent : Color.accent
+            accent: root.problemField === "totp" ? Commons.Color.urgent : Commons.Color.accent
             font.family: root.fontFamily
             onAccepted: root.submit()
             Keys.onEscapePressed: function (event) {
@@ -504,7 +505,7 @@ ColumnLayout {
     Text {
         Layout.fillWidth: true
         text: root.statusText
-        color: root.statusIsProblem ? Color.urgent : root.dim
+        color: root.statusIsProblem ? Commons.Color.urgent : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
