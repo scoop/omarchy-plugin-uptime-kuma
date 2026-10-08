@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // What one Monitor is doing, for the row the operator has selected.
@@ -19,11 +20,11 @@ Item {
 
     // Theming, passed down by whoever mounts this. The defaults stand alone so
     // the component renders correctly on its own.
-    property color foreground: Color.menu.text
+    property color foreground: Commons.Color.menu.text
     property string fontFamily: Style.font.menuFamily
     // The theme's own green, which the shell palette does not carry. Grey is
     // what "we don't know" looks like, so it is only the fallback.
-    property color okColor: Color.muted
+    property color okColor: Commons.Color.muted
 
     readonly property bool present: monitor !== null && monitor !== undefined
     readonly property color dim: Qt.darker(foreground, 1.4)
@@ -35,10 +36,10 @@ Item {
     // the row above.
     function statusColor(status) {
         if (status === "down") {
-            return Color.urgent;
+            return Commons.Color.urgent;
         }
         if (status === "degraded") {
-            return Color.accent;
+            return Commons.Color.accent;
         }
         return Qt.rgba(okColor.r, okColor.g, okColor.b, 0.8);
     }

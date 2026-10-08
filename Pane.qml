@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "src/rows.js" as Rows
 import "src/sanitize.js" as Sanitize
@@ -32,7 +33,7 @@ Item {
     readonly property string connection: service ? service.connection : "setup"
     readonly property var rows: Rows.flatten(view, filterText, opened_)
 
-    readonly property color foreground: Color.menu.text
+    readonly property color foreground: Commons.Color.menu.text
     readonly property color dim: Qt.darker(foreground, 1.4)
     readonly property string fontFamily: Style.font.menuFamily
 
@@ -65,12 +66,12 @@ Item {
     // and this plugin has a real unknown state to spend it on.
     function statusColor(status) {
         if (status === "down") {
-            return Color.urgent;
+            return Commons.Color.urgent;
         }
         if (status === "degraded") {
-            return Color.accent;
+            return Commons.Color.accent;
         }
-        var ok = service ? service.okColor : Color.muted;
+        var ok = service ? service.okColor : Commons.Color.muted;
         // Calm, but still an assertion: this was checked and it passed.
         return Qt.rgba(ok.r, ok.g, ok.b, 0.8);
     }
@@ -233,7 +234,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            color: Color.menu.scrim
+            color: Commons.Color.menu.scrim
         }
 
         MouseArea {
@@ -249,11 +250,11 @@ Item {
             height: Math.min(Style.space(520), panel.height - Style.space(40))
             radius: Style.space(12)
             anchors.centerIn: parent
-            color: Color.menu.background
+            color: Commons.Color.menu.background
             borderSpec: Border.surfaceSpec(
                 "menu",
                 "border",
-                Color.menu.border,
+                Commons.Color.menu.border,
                 Math.max(1, Style.space(2))
             )
 
@@ -365,7 +366,7 @@ Item {
                                     root.connection === "unreachable"
                                         ? root.dim
                                         : root.view && root.view.counts.down > 0
-                                          ? Color.urgent
+                                          ? Commons.Color.urgent
                                           : root.foreground
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.font.display
@@ -380,7 +381,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: staleColumn.implicitHeight + Style.space(14)
                         visible: root.connection === "unreachable"
-                        color: Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.14)
+                        color: Qt.rgba(Commons.Color.urgent.r, Commons.Color.urgent.g, Commons.Color.urgent.b, 0.14)
                         radius: Style.space(6)
 
                         ColumnLayout {
@@ -492,7 +493,7 @@ Item {
                                 visible: !rowItem.isSection
                                 anchors.fill: parent
                                 radius: Style.space(6)
-                                color: rowItem.selected ? Color.menu.selectedBackground : "transparent"
+                                color: rowItem.selected ? Commons.Color.menu.selectedBackground : "transparent"
                             }
 
                             MouseArea {
@@ -536,7 +537,7 @@ Item {
                                     Text {
                                         Layout.fillWidth: true
                                         text: rowItem.modelData.label
-                                        color: rowItem.selected ? Color.menu.selectedText : root.foreground
+                                        color: rowItem.selected ? Commons.Color.menu.selectedText : root.foreground
                                         font.family: root.fontFamily
                                         font.pixelSize: Style.font.body
                                         font.bold: rowItem.isGroup
@@ -550,7 +551,7 @@ Item {
                                         Layout.fillWidth: true
                                         visible: rowItem.showsError
                                         text: rowItem.modelData.error
-                                        color: Color.urgent
+                                        color: Commons.Color.urgent
                                         font.family: root.fontFamily
                                         font.pixelSize: Style.font.caption
                                         // The selected row shows its whole
@@ -583,7 +584,7 @@ Item {
                             : null
                         foreground: root.foreground
                         fontFamily: root.fontFamily
-                        okColor: root.service ? root.service.okColor : Color.muted
+                        okColor: root.service ? root.service.okColor : Commons.Color.muted
                     }
 
                     PanelSeparator {

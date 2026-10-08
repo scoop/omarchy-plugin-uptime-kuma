@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The bar presence: absent while everything is healthy.
@@ -111,7 +112,7 @@ BarWidget {
             text: root.connection === "unreachable" ? "\uf127" : "\uf0f3"
             font.family: bar ? bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.body
-            color: root.connection === "unreachable" ? Color.muted : Color.urgent
+            color: root.connection === "unreachable" ? Commons.Color.muted : Commons.Color.urgent
             textFormat: Text.PlainText
         }
 
@@ -123,7 +124,7 @@ BarWidget {
             // While we cannot reach Uptime Kuma this count is the last thing we
             // were told, not what is true now. It should not look as certain as
             // the glyph beside it admits we are not.
-            color: root.connection === "unreachable" ? Color.muted : Color.urgent
+            color: root.connection === "unreachable" ? Commons.Color.muted : Commons.Color.urgent
             textFormat: Text.PlainText
         }
     }

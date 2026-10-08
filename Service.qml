@@ -1,7 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import qs.Commons
+import qs.Commons as Commons
 import "src/engine.js" as Engine
 import "src/model.js" as Model
 
@@ -73,7 +73,7 @@ Item {
     // to say "checked, and fine" in a way that reads differently from "no
     // information", so we read that one value ourselves rather than inventing a
     // colour or settling for grey.
-    property color okColor: Color.muted
+    property color okColor: Commons.Color.muted
 
     // Watcher only. FileView follows symlinks, blocks on a FIFO and reads a file
     // whole before any size check runs, and the theme directory is writable by
@@ -82,7 +82,7 @@ Item {
     // its refusals on the open itself.
     FileView {
         id: themeWatcher
-        path: Color.currentThemePath + "/colors.toml"
+        path: Commons.Color.currentThemePath + "/colors.toml"
         watchChanges: true
         preload: false
         blockAllReads: true
@@ -98,11 +98,11 @@ Item {
         onFinishedWith: function (text, tooLarge) {
             // An oversized theme file is a refusal, not something to parse.
             if (tooLarge || text.length === 0) {
-                root.okColor = Color.muted;
+                root.okColor = Commons.Color.muted;
                 return;
             }
             var match = /^[ \t]*green[ \t]*=[ \t]*["']?(#[0-9A-Fa-f]{6})/m.exec(text);
-            root.okColor = match ? match[1] : Color.muted;
+            root.okColor = match ? match[1] : Commons.Color.muted;
         }
     }
 
