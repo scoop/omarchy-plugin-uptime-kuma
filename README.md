@@ -53,9 +53,10 @@ token goes into the login keyring; the URL and username are written to
 `~/.config/omarchy/shell.json`. Changing your Uptime Kuma password revokes the
 token, which asks you to sign in again — that is intended, not a fault.
 
-Neither the password, the two-factor code nor the token is ever passed to
-another program as a command-line argument or an environment variable, both of
-which any process running as you can read. They travel on pipes.
+Neither the password, the two-factor code, the token nor the Engine.IO session
+id is ever passed to another program as a command-line argument or an
+environment variable. Command lines are readable by every local account, and
+environments by any process running as you. They travel on pipes.
 
 Every helper the panel starts runs under `bin/supervise.sh`, in a process group
 of its own and — apart from the poll, which runs until it is stopped — under a

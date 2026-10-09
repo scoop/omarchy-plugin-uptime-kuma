@@ -169,15 +169,25 @@ esac
 [[ "${handshake:0:1}" == "0" ]] || die "Not an Uptime Kuma socket endpoint"
 sid="$(printf '%s' "${handshake:1}" | /usr/bin/jq -r '.sid // ""')"
 [[ -n "$sid" ]] || die "Handshake returned no session id"
+# It goes into a curl config line below, so nothing that could end the quoted
+# value there. Engine.IO's own ids are base64url.
+[[ "$sid" =~ ^[A-Za-z0-9_-]+$ ]] || die "Handshake returned a malformed session id"
 
-session="$endpoint&sid=$sid"
+# The session id is a credential too: Engine.IO routes any request carrying it
+# to the socket this script has already signed in, so it must not be visible in
+# curl's argv (/proc/<pid>/cmdline) any more than the token is. curl reads it
+# from a config on a pipe, written by the printf builtin; argv shows only the
+# endpoint and /dev/fd/N.
+sid_config() {
+    printf 'url-query = "sid=%s"\n' "$sid"
+}
 
 # A POST's answer is bounded like every other response, even though the server
 # only ever says "ok" to one.
 post() {
     local rc
     {
-        printf '%s' "$1" | "${curl_common[@]}" -X POST --data-binary @- "$session" |
+        printf '%s' "$1" | "${curl_common[@]}" -X POST --data-binary @- -K <(sid_config) "$endpoint" |
             /usr/bin/head -c $((MAX_BODY + 1)) >/dev/null
     } &
     job=$!
@@ -197,7 +207,7 @@ post '40' || die "Could not open the socket namespace"
 {
     printf '%s' "$input" |
         /usr/bin/jq -j '"420", (["loginByToken", .token] | tojson)' |
-        "${curl_common[@]}" -X POST --data-binary @- "$session" |
+        "${curl_common[@]}" -X POST --data-binary @- -K <(sid_config) "$endpoint" |
         /usr/bin/head -c $((MAX_BODY + 1)) >/dev/null
 } &
 job=$!
@@ -209,7 +219,7 @@ job=""
 # empty. Read the acknowledgement and say so, with a distinct exit code the
 # caller can turn into "ask for credentials again" rather than "retry later".
 for _ in 1 2 3 4 5 6; do
-    ack_body="$(fetch "$session")"
+    ack_body="$(fetch -K <(sid_config) "$endpoint")"
     case $? in
         0) ;;
         2) die "$url sent more data than this can handle" ;;
@@ -236,7 +246,7 @@ for _ in 1 2 3 4 5 6; do
 done
 
 while :; do
-    body="$(fetch "$session")"
+    body="$(fetch -K <(sid_config) "$endpoint")"
     case $? in
         0) ;;
         2) die "$url sent more data than this can handle" ;;
