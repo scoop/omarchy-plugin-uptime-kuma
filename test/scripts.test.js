@@ -782,3 +782,45 @@ test("stopping a supervised poll takes its curl with it", async () => {
     expect(matching(pattern)).toEqual([]);
     server.stop(true);
 });
+
+for (const [script, input] of [
+    ["poll.sh", (url) => ({ url, token: TOKEN })],
+    ["login.sh", (url) => ({ origin: url, url, username: "you", password: PASSWORD })],
+]) {
+    test(`${script} never puts the Engine.IO session id in curl's argv`, async () => {
+        // The finding this answers: Engine.IO hands the signed-in socket to any
+        // request that carries its sid, so a sid readable from
+        // /proc/<pid>/cmdline is a credential other local accounts can read.
+        // The stub holds the poll open, so a curl carrying the sid sits there
+        // long enough to be looked for.
+        server = startServer("", { hang: true });
+        const port = server.port;
+        // Supervised, as the panel runs it, so stopping it takes its curl along.
+        const proc = Bun.spawn([join(BIN, "supervise.sh"), "0", join(BIN, script)], {
+            stdin: new TextEncoder().encode(
+                JSON.stringify(input(`http://127.0.0.1:${port}`)) + "\n",
+            ),
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+
+        // Every request after the handshake carries the sid, so look at every
+        // curl the script starts until it is waiting on the held poll.
+        const pattern = `127\\.0\\.0\\.1:${port}/socket\\.io`;
+        const leaked = new Set();
+        let seen = false;
+        const settled = await until(() => {
+            seen ||= matching(pattern).length > 0;
+            for (const pid of matching(`${pattern}.*sid=`)) {
+                leaked.add(pid);
+            }
+            return received.length >= 2 && matching(pattern).length > 0;
+        });
+        expect(settled && seen).toBe(true);
+        expect([...leaked]).toEqual([]);
+
+        proc.kill();
+        await proc.exited;
+        server.stop(true);
+    }, 10000);
+}

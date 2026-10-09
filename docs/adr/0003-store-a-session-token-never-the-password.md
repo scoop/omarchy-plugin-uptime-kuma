@@ -26,7 +26,10 @@ not `jq`, not `secret-tool` — because `/proc/<pid>/cmdline` and
 request object is piped into `jq`, which writes the packet, which is piped into
 `curl`; the token is piped into `secret-tool`. The practice is taken from
 `daan.uptime-kuma`; `test/scripts.test.js` enforces it by running the helpers
-with a `jq` that records its own argv. A password change logs the plugin out, which surfaces
+with a `jq` that records its own argv. The same holds for the Engine.IO session
+id: once a socket is signed in, a request carrying its id alone acts as the
+account, so `curl` reads it from a config on a pipe rather than in the URL it is
+given, and the tests check every running `curl` for it. A password change logs the plugin out, which surfaces
 as a prompt to authenticate again; this is correct behaviour, not a fault.
 
 Two-factor authentication is fully supported as a consequence of this design.

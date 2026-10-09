@@ -156,7 +156,7 @@ endpoint="$url/socket.io/?EIO=4&transport=polling"
 # A POST's response is bounded the same way, even though the server only ever
 # answers "ok": it is a response from the network like any other.
 post() {
-    "${curl_common[@]}" -X POST --data-binary @- "$session" |
+    "${curl_common[@]}" -X POST --data-binary @- -K <(sid_config) "$endpoint" |
         /usr/bin/head -c $((MAX_BODY + 1)) >/dev/null
 }
 
@@ -170,8 +170,14 @@ esac
 [[ "${handshake:0:1}" == "0" ]] || fail "Not an Uptime Kuma socket endpoint"
 sid="$(printf '%s' "${handshake:1}" | /usr/bin/jq -r '.sid // ""')"
 [[ -n "$sid" ]] || fail "Handshake returned no session id"
+# Kept out of curl's argv for the reason given in poll.sh: once the password has
+# been sent, this id is enough to act as the account. It goes into a curl config
+# line, so nothing that could end the quoted value there.
+[[ "$sid" =~ ^[A-Za-z0-9_-]+$ ]] || fail "Handshake returned a malformed session id"
 
-session="$endpoint&sid=$sid"
+sid_config() {
+    printf 'url-query = "sid=%s"\n' "$sid"
+}
 
 printf '40' | post || fail "Could not open the socket namespace"
 
@@ -189,7 +195,7 @@ printf '%s' "$input" |
 # The acknowledgement may not be in the first response; the server sends its
 # own greeting packets first.
 for _ in 1 2 3 4 5 6; do
-    body="$(fetch "$session")"
+    body="$(fetch -K <(sid_config) "$endpoint")"
     case $? in
         0) ;;
         2) fail "$url sent more data than this can handle" ;;
