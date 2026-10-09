@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.3](https://github.com/scoop/omarchy-plugin-uptime-kuma/compare/v1.1.2...v1.1.3) (2026-10-09)
+
+
+### Bug Fixes
+
+* keep Engine.IO sid out of curl argv ([#20](https://github.com/scoop/omarchy-plugin-uptime-kuma/issues/20)) ([e217ebb](https://github.com/scoop/omarchy-plugin-uptime-kuma/commit/e217ebb6b967797ea071bdce24289330cf3b13c5))
+
 ## [1.1.2](https://github.com/scoop/omarchy-plugin-uptime-kuma/compare/v1.1.1...v1.1.2) (2026-10-08)
 
 
