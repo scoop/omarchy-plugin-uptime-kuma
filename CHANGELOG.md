@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/scoop/omarchy-plugin-uptime-kuma/compare/v1.1.1...v1.1.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* qualify Commons Color refs for Qt 6.12 ([#18](https://github.com/scoop/omarchy-plugin-uptime-kuma/issues/18)) ([c3b841c](https://github.com/scoop/omarchy-plugin-uptime-kuma/commit/c3b841cb77c318dfe84c9cb4caa657bc5d6c815f)), closes [#17](https://github.com/scoop/omarchy-plugin-uptime-kuma/issues/17)
+
 ## [1.1.1](https://github.com/scoop/omarchy-plugin-uptime-kuma/compare/v1.1.0...v1.1.1) (2026-09-30)
 
 
